@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { countPendingSales } from "@/infrastructure/offline/queue";
+import { countPendingWorkerOps } from "@/infrastructure/offline/worker-ops";
 import {
+  isSessionInvalid,
   runSync,
   startSyncEngine,
   subscribeSyncEngine,
@@ -22,7 +24,7 @@ function subscribeToConnectivity(callback: () => void) {
 // right after — this is the pattern React recommends for browser-only APIs
 // specifically to avoid the hydration mismatch a plain useState(() =>
 // navigator.onLine) initializer would cause (server has no `navigator`).
-function useIsOnline() {
+export function useIsOnline() {
   return useSyncExternalStore(
     subscribeToConnectivity,
     () => navigator.onLine,
@@ -33,19 +35,26 @@ function useIsOnline() {
 export function useOnlineStatus() {
   const isOnline = useIsOnline();
   const [pendingCount, setPendingCount] = useState(0);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
 
   useEffect(() => {
     startSyncEngine();
 
     const refreshPendingCount = () => {
-      void countPendingSales().then(setPendingCount);
+      // Sales plus worker registrations/PIN changes waiting to sync.
+      void Promise.all([countPendingSales(), countPendingWorkerOps()]).then(
+        ([sales, ops]) => setPendingCount(sales + ops),
+      );
     };
     refreshPendingCount();
 
     const handleOnline = () => void runSync();
 
     window.addEventListener("online", handleOnline);
-    const unsubscribe = subscribeSyncEngine(refreshPendingCount);
+    const unsubscribe = subscribeSyncEngine(() => {
+      refreshPendingCount();
+      setSessionInvalid(isSessionInvalid());
+    });
     const interval = setInterval(refreshPendingCount, 5_000);
 
     return () => {
@@ -55,5 +64,5 @@ export function useOnlineStatus() {
     };
   }, []);
 
-  return { isOnline, pendingCount };
+  return { isOnline, pendingCount, sessionInvalid };
 }

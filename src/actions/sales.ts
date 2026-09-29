@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createSaleUseCase } from "@/application/use-cases/sales/create-sale";
 import { UnauthorizedError } from "@/domain/errors";
 import { auth } from "@/infrastructure/auth";
-import { saleRepository } from "@/infrastructure/repositories";
+import { saleDeps } from "@/infrastructure/deps";
 
 export async function createSale(input: unknown) {
   const session = await auth();
@@ -12,7 +12,11 @@ export async function createSale(input: unknown) {
     throw new UnauthorizedError();
   }
 
-  const result = await createSaleUseCase(saleRepository, input, session.user.id);
+  const result = await createSaleUseCase(
+    saleDeps,
+    input,
+    session.user.id,
+  );
 
   revalidatePath("/admin/sales");
   return result;

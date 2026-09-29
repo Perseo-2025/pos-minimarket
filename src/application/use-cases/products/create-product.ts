@@ -1,10 +1,13 @@
+import type { CategoryRepository } from "@/domain/repositories/category-repository";
 import type { ProductRepository } from "@/domain/repositories/product-repository";
 import { productCreateSchema } from "@/application/validation/product";
+import { ensureAssignableCategory } from "./ensure-category";
 
 export async function createProductUseCase(
-  repo: ProductRepository,
+  repos: { products: ProductRepository; categories: CategoryRepository },
   input: unknown,
 ) {
   const data = productCreateSchema.parse(input);
-  await repo.create(data);
+  await ensureAssignableCategory(repos.categories, data.categoryId);
+  await repos.products.create(data);
 }

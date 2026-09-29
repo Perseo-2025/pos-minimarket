@@ -22,6 +22,34 @@
       "when": 1790096771716,
       "tag": "0002_sharp_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790646193380,
+      "tag": "0003_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790646240771,
+      "tag": "0004_products_category_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790647335302,
+      "tag": "0005_worker_discounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790708583149,
+      "tag": "0006_per_product_discount",
+      "breakpoints": true
     }
   ]
 }

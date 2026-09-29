@@ -1,21 +1,30 @@
-import { asc, eq } from "drizzle-orm";
-import type { Product } from "@/domain/entities/product";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import type { CategoryIcon } from "@/domain/entities/category";
+import type { Product, ProductCatalogEntry } from "@/domain/entities/product";
 import type {
   CreateProductData,
   ProductRepository,
   UpdateProductData,
 } from "@/domain/repositories/product-repository";
 import { db } from "@/infrastructure/db/client";
-import { products } from "@/infrastructure/db/schema";
+import { categories, products } from "@/infrastructure/db/schema";
 
-function toProduct(row: typeof products.$inferSelect): Product {
+type ProductRow = {
+  product: typeof products.$inferSelect;
+  category: typeof categories.$inferSelect;
+};
+
+function toProduct({ product: row, category }: ProductRow): Product {
   return {
     id: row.id,
     sku: row.sku,
     name: row.name,
     description: row.description,
-    category: row.category,
+    categoryId: row.categoryId,
+    categoryName: category.name,
+    categoryIcon: category.icon as CategoryIcon | null,
     priceSale: Number(row.priceSale),
+    workerDiscountPercent: Number(row.workerDiscountPercent),
     priceCost: row.priceCost === null ? null : Number(row.priceCost),
     stockQuantity: row.stockQuantity,
     trackStock: row.trackStock,
@@ -24,30 +33,38 @@ function toProduct(row: typeof products.$inferSelect): Product {
   };
 }
 
+// Every read joins the category: products are always shown with its name,
+// and ordered the same way the POS sidebar is.
+function selectProducts() {
+  return db
+    .select({ product: products, category: categories })
+    .from(products)
+    .innerJoin(categories, eq(products.categoryId, categories.id));
+}
+
+const order = [
+  asc(categories.sortOrder),
+  asc(categories.name),
+  asc(products.name),
+];
+
 export class DrizzleProductRepository implements ProductRepository {
   async findActive(): Promise<Product[]> {
-    const rows = await db
-      .select()
-      .from(products)
-      .where(eq(products.isActive, true))
-      .orderBy(asc(products.category), asc(products.name));
+    const rows = await selectProducts()
+      .where(and(eq(products.isActive, true), eq(categories.isActive, true)))
+      .orderBy(...order);
 
     return rows.map(toProduct);
   }
 
   async findAll(): Promise<Product[]> {
-    const rows = await db
-      .select()
-      .from(products)
-      .orderBy(asc(products.category), asc(products.name));
+    const rows = await selectProducts().orderBy(...order);
 
     return rows.map(toProduct);
   }
 
   async findById(id: string): Promise<Product | null> {
-    const [row] = await db
-      .select()
-      .from(products)
+    const [row] = await selectProducts()
       .where(eq(products.id, id))
       .limit(1);
 
@@ -58,8 +75,10 @@ export class DrizzleProductRepository implements ProductRepository {
     await db.insert(products).values({
       name: data.name,
       description: data.description,
-      category: data.category,
+      categoryId: data.categoryId,
       priceSale: data.priceSale.toString(),
+      workerDiscountPercent: data.workerDiscountPercent.toString(),
+      imageUrl: data.imageUrl ?? null,
     });
   }
 
@@ -69,8 +88,10 @@ export class DrizzleProductRepository implements ProductRepository {
       .set({
         name: data.name,
         description: data.description,
-        category: data.category,
+        categoryId: data.categoryId,
         priceSale: data.priceSale.toString(),
+        workerDiscountPercent: data.workerDiscountPercent.toString(),
+        imageUrl: data.imageUrl,
         updatedAt: new Date(),
       })
       .where(eq(products.id, data.id));
@@ -81,5 +102,38 @@ export class DrizzleProductRepository implements ProductRepository {
       .update(products)
       .set({ isActive, updatedAt: new Date() })
       .where(eq(products.id, id));
+  }
+
+  async isImageInUse(imageUrl: string): Promise<boolean> {
+    const [row] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.imageUrl, imageUrl))
+      .limit(1);
+
+    return row !== undefined;
+  }
+
+  async findCatalogByIds(ids: string[]): Promise<Map<string, ProductCatalogEntry>> {
+    if (ids.length === 0) return new Map();
+
+    const rows = await db
+      .select({
+        id: products.id,
+        priceSale: products.priceSale,
+        workerDiscountPercent: products.workerDiscountPercent,
+      })
+      .from(products)
+      .where(inArray(products.id, ids));
+
+    return new Map(
+      rows.map((row) => [
+        row.id,
+        {
+          price: Number(row.priceSale),
+          workerDiscountPercent: Number(row.workerDiscountPercent),
+        },
+      ]),
+    );
   }
 }

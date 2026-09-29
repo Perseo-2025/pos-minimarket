@@ -1,11 +1,20 @@
 import { listPendingSales, markSaleStatus, markSaleSynced } from "./queue";
+import { refreshWorkerSnapshot } from "./worker-cache";
+import { SessionRejectedError, syncWorkerOps } from "./worker-ops";
 
 let syncing = false;
+// Set when the server rejects the session itself (401). Sales stay queued —
+// they are never discarded — and the UI asks the cashier to log in again.
+let sessionInvalid = false;
 const listeners = new Set<() => void>();
 
 export function subscribeSyncEngine(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+export function isSessionInvalid() {
+  return sessionInvalid;
 }
 
 function notify() {
@@ -21,6 +30,18 @@ async function syncOne(saleId: string, payload: unknown) {
 
   if (response.ok) {
     await markSaleSynced(saleId);
+    return;
+  }
+
+  if (response.status === 401) {
+    // Every remaining sale would fail the same way — stop this run.
+    throw new SessionRejectedError();
+  }
+
+  if (response.status === 403) {
+    // Sale belongs to another cashier: keep it pending until that cashier
+    // (or an admin) syncs it from this device.
+    await markSaleStatus(saleId, "pending");
     return;
   }
 
@@ -40,7 +61,21 @@ export async function runSync() {
   syncing = true;
 
   try {
+    sessionInvalid = false;
+    // Worker registrations / PIN resets / failed-PIN events first.
+    let workerOpsSynced = 0;
+    try {
+      workerOpsSynced = await syncWorkerOps();
+    } catch (error) {
+      if (error instanceof SessionRejectedError) {
+        sessionInvalid = true;
+        return;
+      }
+    }
+
     const pending = await listPendingSales();
+    let salesSynced = 0;
+
     for (const sale of pending) {
       if (sale.status === "error") continue;
 
@@ -48,15 +83,31 @@ export async function runSync() {
         await markSaleStatus(sale.id, "syncing");
         await syncOne(sale.id, {
           id: sale.id,
+          cashierId: sale.cashierId,
           paymentType: sale.paymentType,
           items: sale.items,
           total: sale.total,
           clientCreatedAt: sale.clientCreatedAt,
+          workerId: sale.workerId,
+          workerVerification: sale.workerVerification,
+          verificationToken: sale.verificationToken,
+          discountTotal: sale.discountTotal,
+          policyId: sale.policyId,
+          courtesyToken: sale.courtesyToken,
         });
-      } catch {
+        salesSynced++;
+      } catch (error) {
         await markSaleStatus(sale.id, "pending");
+        if (error instanceof SessionRejectedError) {
+          sessionInvalid = true;
+          break;
+        }
       }
     }
+
+    // Keep the offline worker list and discount usage fresh: forced after
+    // anything synced (usage changed), throttled otherwise.
+    await refreshWorkerSnapshot({ force: salesSynced + workerOpsSynced > 0 });
   } finally {
     syncing = false;
     notify();

@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import type { UserWithCredentials } from "@/domain/entities/user";
+import type { User, UserWithCredentials } from "@/domain/entities/user";
 import type {
   CreateUserData,
   UserRepository,
@@ -19,6 +19,22 @@ function toUser(row: typeof users.$inferSelect): UserWithCredentials {
 }
 
 export class DrizzleUserRepository implements UserRepository {
+  async findById(id: string): Promise<User | null> {
+    const [row] = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        username: users.username,
+        role: users.role,
+        isActive: users.isActive,
+      })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
   async findByUsername(username: string): Promise<UserWithCredentials | null> {
     const [row] = await db
       .select()

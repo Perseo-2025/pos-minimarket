@@ -1,5 +1,6 @@
 "use client";
 
+import { PlusIcon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { createUser } from "@/actions/users";
@@ -50,7 +51,14 @@ export function UserForm() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button>Nuevo usuario</Button>} />
+      <DialogTrigger
+        render={
+          <Button>
+            <PlusIcon data-icon="inline-start" />
+            Nuevo usuario
+          </Button>
+        }
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Nuevo usuario</DialogTitle>

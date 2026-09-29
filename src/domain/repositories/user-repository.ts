@@ -1,4 +1,4 @@
-import type { UserRole, UserWithCredentials } from "../entities/user";
+import type { User, UserRole, UserWithCredentials } from "../entities/user";
 
 export interface CreateUserData {
   name: string;
@@ -8,6 +8,7 @@ export interface CreateUserData {
 }
 
 export interface UserRepository {
+  findById(id: string): Promise<User | null>;
   findByUsername(username: string): Promise<UserWithCredentials | null>;
   findAll(): Promise<UserWithCredentials[]>;
   create(data: CreateUserData): Promise<void>;

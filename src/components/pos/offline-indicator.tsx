@@ -4,7 +4,16 @@ import { Badge } from "@/components/ui/badge";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 
 export function OfflineIndicator() {
-  const { isOnline, pendingCount } = useOnlineStatus();
+  const { isOnline, pendingCount, sessionInvalid } = useOnlineStatus();
+
+  if (sessionInvalid) {
+    return (
+      <Badge variant="destructive">
+        Sesión inválida · vuelva a iniciar sesión
+        {pendingCount > 0 ? ` · ${pendingCount} pendiente(s)` : ""}
+      </Badge>
+    );
+  }
 
   if (isOnline && pendingCount === 0) {
     return <Badge variant="secondary">En línea</Badge>;

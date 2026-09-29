@@ -18,7 +18,10 @@ const serwist = new Serwist({
   navigationPreload: true,
   runtimeCaching: [
     {
-      matcher: ({ url }) => url.pathname.startsWith("/api/sync"),
+      matcher: ({ url }) =>
+        url.pathname.startsWith("/api/sync") ||
+        url.pathname.startsWith("/api/workers") ||
+        url.pathname.startsWith("/api/courtesy"),
       handler: new NetworkOnly(),
     },
     {

@@ -11,6 +11,7 @@ export function useCart() {
     id: string;
     name: string;
     priceSale: number;
+    workerDiscountPercent: number;
   }) {
     setItems((prev) => {
       const existing = prev.find((item) => item.productId === product.id);
@@ -28,6 +29,8 @@ export function useCart() {
           name: product.name,
           unitPrice: product.priceSale,
           quantity: 1,
+          workerDiscountPercent: product.workerDiscountPercent,
+          isCourtesy: false,
         },
       ];
     });
@@ -41,6 +44,14 @@ export function useCart() {
     setItems((prev) =>
       prev.map((item) =>
         item.productId === productId ? { ...item, quantity } : item,
+      ),
+    );
+  }
+
+  function setCourtesy(productId: string, isCourtesy: boolean) {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.productId === productId ? { ...item, isCourtesy } : item,
       ),
     );
   }
@@ -61,5 +72,5 @@ export function useCart() {
     [items],
   );
 
-  return { items, addItem, setQuantity, removeItem, clear, total };
+  return { items, addItem, setQuantity, setCourtesy, removeItem, clear, total };
 }

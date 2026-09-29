@@ -1,56 +1,94 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { PaymentType } from "@/domain/entities/sale";
+import { PAYMENT_TYPE_LABELS, type PaymentType } from "@/domain/entities/sale";
+import type { SalePricing } from "@/domain/services/sale-pricing";
 import { formatSoles } from "@/lib/money";
+import { PAYMENT_TYPE_ICONS } from "./pos-icons";
 
-const PAYMENT_OPTIONS: { value: PaymentType; label: string }[] = [
-  { value: "cash", label: "Efectivo" },
-  { value: "yape_plin", label: "Yape / Plin" },
-  { value: "card", label: "Tarjeta (POS)" },
-];
-
+// Final confirmation only — the payment method is chosen in the cart, before
+// "Cobrar", so the cashier sees it at all times.
 export function CheckoutDialog({
   open,
-  total,
+  pricing,
+  workerName,
+  courtesyApprovedBy,
+  paymentType,
   onOpenChange,
   onConfirm,
 }: {
   open: boolean;
-  total: number;
+  pricing: SalePricing;
+  workerName: string | null;
+  courtesyApprovedBy: string | null;
+  paymentType: PaymentType;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (paymentType: PaymentType) => void;
+  onConfirm: () => void;
 }) {
-  const [paymentType, setPaymentType] = useState<PaymentType>("cash");
+  const Icon = PAYMENT_TYPE_ICONS[paymentType];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Cobrar {formatSoles(total)}</DialogTitle>
+          <DialogTitle className="text-xl">Confirmar cobro</DialogTitle>
+          <DialogDescription>
+            Verifica el monto y el método de pago antes de registrar la venta.
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-1 gap-2">
-          {PAYMENT_OPTIONS.map((option) => (
-            <Button
-              key={option.value}
-              size="lg"
-              variant={paymentType === option.value ? "default" : "outline"}
-              onClick={() => setPaymentType(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
+
+        <div className="flex flex-col items-center gap-3 rounded-xl border bg-muted/30 py-6">
+          <span className="text-4xl font-bold tracking-tight tabular-nums">
+            {formatSoles(pricing.total)}
+          </span>
+          {(pricing.discountTotal > 0 || pricing.courtesyTotal > 0) && (
+            <span className="flex flex-col items-center text-sm text-muted-foreground tabular-nums">
+              <s>{formatSoles(pricing.subtotal)}</s>
+              {pricing.discountTotal > 0 && (
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                  −{formatSoles(pricing.discountTotal)} de descuento trabajador
+                </span>
+              )}
+              {pricing.courtesyTotal > 0 && (
+                <span className="font-medium text-brand-orange">
+                  −{formatSoles(pricing.courtesyTotal)} en cortesía
+                  {courtesyApprovedBy && ` (aprobó ${courtesyApprovedBy})`}
+                </span>
+              )}
+            </span>
+          )}
+          <span className="flex items-center gap-2 text-base font-medium text-muted-foreground">
+            <Icon className="size-5" aria-hidden />
+            {PAYMENT_TYPE_LABELS[paymentType]}
+          </span>
+          {workerName && (
+            <span className="text-sm text-muted-foreground">
+              Trabajador: <strong className="text-foreground">{workerName}</strong>
+            </span>
+          )}
         </div>
-        <DialogFooter>
-          <Button size="lg" onClick={() => onConfirm(paymentType)}>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            variant="outline"
+            className="h-12 text-base"
+            onClick={() => onOpenChange(false)}
+          >
+            Volver
+          </Button>
+          <Button
+            className="h-12 text-base font-semibold"
+            autoFocus
+            onClick={onConfirm}
+          >
             Confirmar venta
           </Button>
         </DialogFooter>

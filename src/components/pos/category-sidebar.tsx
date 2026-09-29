@@ -1,10 +1,12 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { CategoryGlyph } from "./category-glyph";
 
 export type SidebarCategory = {
   value: string;
   label: string;
+  icon: string | null;
 };
 
 export function CategorySidebar({
@@ -24,14 +26,16 @@ export function CategorySidebar({
           <button
             key={category.value}
             type="button"
+            aria-pressed={isSelected}
             onClick={() => onSelect(category.value)}
             className={cn(
-              "min-h-16 rounded-lg px-2 py-4 text-center text-xs font-heading font-semibold transition-colors sm:min-h-20 sm:py-5 sm:text-sm",
+              "flex min-h-16 flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-3 text-center text-xs font-heading font-semibold transition-colors sm:min-h-20 sm:py-4 sm:text-sm",
               isSelected
                 ? "bg-brand-orange text-white shadow-sm"
                 : "bg-transparent text-muted-foreground hover:bg-brand-blue/10 hover:text-brand-blue",
             )}
           >
+            <CategoryGlyph icon={category.icon} className="size-5 sm:size-6" />
             {category.label}
           </button>
         );

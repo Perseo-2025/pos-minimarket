@@ -6,7 +6,12 @@ import { setProductActiveUseCase } from "@/application/use-cases/products/set-pr
 import { updateProductUseCase } from "@/application/use-cases/products/update-product";
 import { UnauthorizedError } from "@/domain/errors";
 import { auth } from "@/infrastructure/auth";
-import { productRepository } from "@/infrastructure/repositories";
+import {
+  categoryRepository,
+  productRepository,
+} from "@/infrastructure/repositories";
+import { imageStorage } from "@/infrastructure/storage";
+import { runAction } from "./action-result";
 
 async function requireAdmin() {
   const session = await auth();
@@ -16,19 +21,35 @@ async function requireAdmin() {
 }
 
 export async function createProduct(input: unknown) {
-  await requireAdmin();
-  await createProductUseCase(productRepository, input);
+  return runAction(async () => {
+    await requireAdmin();
+    await createProductUseCase(
+      { products: productRepository, categories: categoryRepository },
+      input,
+    );
 
-  revalidatePath("/admin/products");
-  revalidatePath("/pos");
+    revalidatePath("/admin/products");
+    revalidatePath("/admin/categories");
+    revalidatePath("/pos");
+  });
 }
 
 export async function updateProduct(input: unknown) {
-  await requireAdmin();
-  await updateProductUseCase(productRepository, input);
+  return runAction(async () => {
+    await requireAdmin();
+    await updateProductUseCase(
+      {
+        products: productRepository,
+        categories: categoryRepository,
+        images: imageStorage,
+      },
+      input,
+    );
 
-  revalidatePath("/admin/products");
-  revalidatePath("/pos");
+    revalidatePath("/admin/products");
+    revalidatePath("/admin/categories");
+    revalidatePath("/pos");
+  });
 }
 
 export async function deactivateProduct(id: string) {
@@ -36,6 +57,7 @@ export async function deactivateProduct(id: string) {
   await setProductActiveUseCase(productRepository, id, false);
 
   revalidatePath("/admin/products");
+  revalidatePath("/admin/categories");
   revalidatePath("/pos");
 }
 
@@ -44,5 +66,6 @@ export async function reactivateProduct(id: string) {
   await setProductActiveUseCase(productRepository, id, true);
 
   revalidatePath("/admin/products");
+  revalidatePath("/admin/categories");
   revalidatePath("/pos");
 }

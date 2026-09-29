@@ -1,18 +1,4 @@
-export const PRODUCT_CATEGORIES = [
-  "bebidas",
-  "snacks",
-  "alimentos",
-  "adornos",
-] as const;
-
-export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
-
-export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
-  bebidas: "Bebidas",
-  snacks: "Snacks",
-  alimentos: "Alimentos",
-  adornos: "Adornos",
-};
+import type { CategoryIcon } from "./category";
 
 // priceCost/stockQuantity/trackStock exist for a future inventory phase and
 // are unused by any phase-1 use case.
@@ -21,11 +7,22 @@ export interface Product {
   sku: string | null;
   name: string;
   description: string | null;
-  category: string;
+  categoryId: string;
+  categoryName: string;
+  categoryIcon: CategoryIcon | null;
   priceSale: number;
+  // % an identified airport worker gets off this product (0–99).
+  workerDiscountPercent: number;
   priceCost: number | null;
   stockQuantity: number | null;
   trackStock: boolean;
   imageUrl: string | null;
   isActive: boolean;
+}
+
+// What the server re-prices a sale against: today's catalog price and the
+// worker discount allowed on the product.
+export interface ProductCatalogEntry {
+  price: number;
+  workerDiscountPercent: number;
 }

@@ -1,0 +1,78 @@
+import { desc, eq } from "drizzle-orm";
+import type {
+  DiscountPolicy,
+  DiscountPolicyData,
+} from "@/domain/entities/discount-policy";
+import type { DiscountPolicyRepository } from "@/domain/repositories/discount-policy-repository";
+import { db } from "@/infrastructure/db/client";
+import { discountPolicies, users } from "@/infrastructure/db/schema";
+
+type PolicyRow = typeof discountPolicies.$inferSelect;
+
+function toPolicy(row: PolicyRow, createdByName: string | null = null): DiscountPolicy {
+  return {
+    id: row.id,
+    discountPercent: Number(row.discountPercent),
+    maxDiscountedSalesPerDay: row.maxDiscountedSalesPerDay,
+    maxDiscountPerMonth: Number(row.maxDiscountPerMonth),
+    pointsPerSol: Number(row.pointsPerSol),
+    isActive: row.isActive,
+    createdById: row.createdBy,
+    createdByName,
+    createdAt: row.createdAt,
+  };
+}
+
+export class DrizzleDiscountPolicyRepository implements DiscountPolicyRepository {
+  async getActive() {
+    const [row] = await db
+      .select()
+      .from(discountPolicies)
+      .where(eq(discountPolicies.isActive, true))
+      .orderBy(desc(discountPolicies.createdAt))
+      .limit(1);
+    return row ? toPolicy(row) : null;
+  }
+
+  async findById(id: string) {
+    const [row] = await db
+      .select()
+      .from(discountPolicies)
+      .where(eq(discountPolicies.id, id))
+      .limit(1);
+    return row ? toPolicy(row) : null;
+  }
+
+  async listVersions(limit: number) {
+    const rows = await db
+      .select({ policy: discountPolicies, createdByName: users.name })
+      .from(discountPolicies)
+      .leftJoin(users, eq(discountPolicies.createdBy, users.id))
+      .orderBy(desc(discountPolicies.createdAt))
+      .limit(limit);
+    return rows.map((row) => toPolicy(row.policy, row.createdByName));
+  }
+
+  async createVersion(data: DiscountPolicyData, actorId: string) {
+    return db.transaction(async (tx) => {
+      await tx
+        .update(discountPolicies)
+        .set({ isActive: false })
+        .where(eq(discountPolicies.isActive, true));
+
+      const [row] = await tx
+        .insert(discountPolicies)
+        .values({
+          discountPercent: data.discountPercent.toFixed(2),
+          maxDiscountedSalesPerDay: data.maxDiscountedSalesPerDay,
+          maxDiscountPerMonth: data.maxDiscountPerMonth.toFixed(2),
+          pointsPerSol: data.pointsPerSol.toFixed(2),
+          isActive: true,
+          createdBy: actorId,
+        })
+        .returning();
+
+      return toPolicy(row);
+    });
+  }
+}

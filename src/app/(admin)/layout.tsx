@@ -1,6 +1,13 @@
-import Link from "next/link";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { LogoutButton } from "@/components/layout/logout-button";
+import { AdminSidebar } from "@/components/layout/admin-sidebar";
+import { Separator } from "@/components/ui/separator";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { auth } from "@/infrastructure/auth";
 
 export default async function AdminLayout({
@@ -12,28 +19,29 @@ export default async function AdminLayout({
   if (!session?.user) redirect("/login");
   if (session.user.role !== "admin") redirect("/pos");
 
+  // Persisted by SidebarProvider itself, so the collapsed state survives
+  // navigation and reloads without a flash.
+  const cookieStore = await cookies();
+  const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col justify-between border-r p-4">
-        <div>
-          <p className="mb-4 font-heading font-semibold">
-            POS Minimarket · Admin
-          </p>
-          <nav className="flex flex-col gap-2 text-sm">
-            <Link href="/admin">Dashboard</Link>
-            <Link href="/admin/products">Productos</Link>
-            <Link href="/admin/users">Usuarios</Link>
-            <Link href="/admin/sales">Ventas</Link>
-          </nav>
-        </div>
-        <div className="flex items-center justify-between border-t pt-3">
-          <span className="text-sm text-muted-foreground">
-            {session.user.name}
-          </span>
-          <LogoutButton />
-        </div>
-      </aside>
-      <main className="flex-1 p-6">{children}</main>
-    </div>
+    <TooltipProvider>
+      <SidebarProvider defaultOpen={defaultOpen}>
+        <AdminSidebar userName={session.user.name ?? "Administrador"} />
+        <SidebarInset>
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator
+              orientation="vertical"
+              className="mr-2 data-[orientation=vertical]:h-4"
+            />
+            <span className="text-sm text-muted-foreground">
+              Panel de administración
+            </span>
+          </header>
+          <div className="flex-1 p-4 md:p-6">{children}</div>
+        </SidebarInset>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }
