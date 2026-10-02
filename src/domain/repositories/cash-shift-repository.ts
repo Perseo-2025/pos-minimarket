@@ -31,6 +31,8 @@ export interface CashShiftRepository {
     reportedSales: number;
   }): Promise<void>;
   findOwner(uuid: string): Promise<{ cashierId: number; status: CashShiftStatus } | null>;
+  // The cashier still has a till shift open (on any device).
+  hasOpenShift(cashierId: number): Promise<boolean>;
   // Shifts opened in the range, newest first, with their live totals.
   list(from: Date, to: Date): Promise<CashShift[]>;
   findById(id: number): Promise<CashShift | null>;

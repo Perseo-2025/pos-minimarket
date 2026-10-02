@@ -77,14 +77,14 @@ export class DrizzleAuditRepository implements AuditRepository {
     }));
   }
 
-  async countPinFailuresSince(workerId: number, since: Date) {
+  async countStatementFailuresSince(workerId: number, since: Date) {
     const [row] = await db
       .select({ total: sql<number>`count(*)`.mapWith(Number) })
       .from(auditEvents)
       .where(
         and(
           eq(auditEvents.workerId, workerId),
-          eq(auditEvents.type, "worker_pin_failed"),
+          eq(auditEvents.type, "worker_statement_failed"),
           gte(auditEvents.occurredAt, since),
         ),
       );
@@ -92,7 +92,7 @@ export class DrizzleAuditRepository implements AuditRepository {
   }
 
   async cashierSummary(from: Date, to: Date): Promise<CashierAuditSummary[]> {
-    const saleRows = await db
+    const rows = await db
       .select({
         cashierId: sales.cashierId,
         cashierName: users.name,
@@ -101,9 +101,8 @@ export class DrizzleAuditRepository implements AuditRepository {
           Number,
         ),
         discountTotal: sql<string>`coalesce(sum(${sales.discountTotal}), 0)`,
-        offlineDiscountedSales: sql<number>`count(*) filter (where ${sales.discountTotal} > 0 and ${sales.workerVerification} = 'pin_offline')`.mapWith(
-          Number,
-        ),
+        giftSales: sql<number>`count(*) filter (where ${sales.giftTotal} > 0)`.mapWith(Number),
+        giftTotal: sql<string>`coalesce(sum(${sales.giftTotal}), 0)`,
         flaggedSales: sql<number>`count(*) filter (where ${isFlagged})`.mapWith(Number),
       })
       .from(sales)
@@ -111,56 +110,13 @@ export class DrizzleAuditRepository implements AuditRepository {
       .where(and(gte(sales.clientCreatedAt, from), lte(sales.clientCreatedAt, to)))
       .groupBy(sales.cashierId, users.name);
 
-    const eventRows = await db
-      .select({
-        actorId: auditEvents.actorId,
-        actorName: users.name,
-        pinFailures: sql<number>`count(*) filter (where ${auditEvents.type} = 'worker_pin_failed')`.mapWith(
-          Number,
-        ),
-        pinResets: sql<number>`count(*) filter (where ${auditEvents.type} = 'worker_pin_reset_requested')`.mapWith(
-          Number,
-        ),
-      })
-      .from(auditEvents)
-      .innerJoin(users, eq(auditEvents.actorId, users.id))
-      .where(
-        and(
-          gte(auditEvents.occurredAt, from),
-          lte(auditEvents.occurredAt, to),
-          inArray(auditEvents.type, ["worker_pin_failed", "worker_pin_reset_requested"]),
-        ),
-      )
-      .groupBy(auditEvents.actorId, users.name);
-
-    const byCashier = new Map<number, CashierAuditSummary>();
-    for (const row of saleRows) {
-      byCashier.set(row.cashierId, {
+    return rows
+      .map((row) => ({
         ...row,
         discountTotal: Number(row.discountTotal),
-        pinFailures: 0,
-        pinResets: 0,
-      });
-    }
-    for (const row of eventRows) {
-      if (!row.actorId) continue;
-      const summary = byCashier.get(row.actorId) ?? {
-        cashierId: row.actorId,
-        cashierName: row.actorName,
-        sales: 0,
-        discountedSales: 0,
-        discountTotal: 0,
-        offlineDiscountedSales: 0,
-        flaggedSales: 0,
-        pinFailures: 0,
-        pinResets: 0,
-      };
-      summary.pinFailures = row.pinFailures;
-      summary.pinResets = row.pinResets;
-      byCashier.set(row.actorId, summary);
-    }
-
-    return [...byCashier.values()].sort((a, b) => b.sales - a.sales);
+        giftTotal: Number(row.giftTotal),
+      }))
+      .sort((a, b) => b.sales - a.sales);
   }
 
   async flaggedSales(from: Date, to: Date) {

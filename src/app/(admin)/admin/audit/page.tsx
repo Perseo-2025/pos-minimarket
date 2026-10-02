@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { getAuditReportUseCase } from "@/application/use-cases/audit/get-audit-report";
 import { listShiftsUseCase } from "@/application/use-cases/cash/cash-shifts";
 import { AuditRangeFilter } from "@/components/admin/audit/audit-range-filter";
-import { DataTable, ID_COLUMN, IdCell } from "@/components/admin/data-table";
+import { DataTable, ID_COLUMN, IdCell, ORDER_COLUMN, OrderCell } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -47,11 +47,19 @@ const dateTimeFormat = new Intl.DateTimeFormat("es-PE", {
 const EVENT_TONES: Partial<Record<AuditEventType, string>> = {
   worker_pin_failed: "text-destructive",
   worker_pin_reset_requested: "text-amber-700 dark:text-amber-400",
+  worker_statement_failed: "text-amber-700 dark:text-amber-400",
+  worker_birth_date_updated: "text-amber-700 dark:text-amber-400",
   worker_rejected: "text-muted-foreground",
   worker_suspended: "text-destructive",
   sold_without_stock: "text-amber-700 dark:text-amber-400",
   sold_expired: "text-destructive",
   stock_adjusted: "text-amber-700 dark:text-amber-400",
+  attendance_added: "text-amber-700 dark:text-amber-400",
+  attendance_correction_requested: "text-amber-700 dark:text-amber-400",
+  attendance_correction_rejected: "text-muted-foreground",
+  work_schedule_changed: "text-amber-700 dark:text-amber-400",
+  shift_opened_off_schedule: "text-amber-700 dark:text-amber-400",
+  clock_out_with_open_till: "text-destructive",
 };
 
 const EVENT_CHANNELS: Record<string, string> = {
@@ -61,15 +69,15 @@ const EVENT_CHANNELS: Record<string, string> = {
 };
 
 // A cashier "needs review" when their discount rate is well above the
-// team's, or when there are failed PINs / anomalies. Heuristic, not proof.
+// team's, when they give many birthday gifts, or when there are anomalies.
+// Heuristic, not proof.
 function reviewReasons(row: CashierAuditSummary, averageRate: number) {
   const reasons: string[] = [];
   const rate = row.sales > 0 ? row.discountedSales / row.sales : 0;
   if (row.discountedSales >= 3 && averageRate > 0 && rate > averageRate * 1.5) {
     reasons.push("Da descuento más seguido que el resto");
   }
-  if (row.pinFailures >= 3) reasons.push("Varias claves incorrectas");
-  if (row.pinResets >= 2) reasons.push("Varios cambios de clave");
+  if (row.giftSales >= 3) reasons.push("Varios regalos de cumpleaños");
   if (row.flaggedSales > 0) reasons.push("Ventas con alertas");
   return reasons;
 }
@@ -102,9 +110,10 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
       sales: acc.sales + row.sales,
       discounted: acc.discounted + row.discountedSales,
       discount: round2(acc.discount + row.discountTotal),
-      pinFailures: acc.pinFailures + row.pinFailures,
+      gifts: acc.gifts + row.giftSales,
+      giftTotal: round2(acc.giftTotal + row.giftTotal),
     }),
-    { sales: 0, discounted: 0, discount: 0, pinFailures: 0 },
+    { sales: 0, discounted: 0, discount: 0, gifts: 0, giftTotal: 0 },
   );
   const averageRate = totals.sales > 0 ? totals.discounted / totals.sales : 0;
 
@@ -128,10 +137,9 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
           warn={flagged.length > 0}
         />
         <Metric
-          label="Claves incorrectas"
-          value={`${totals.pinFailures}`}
-          hint="Intentos fallidos en caja"
-          warn={totals.pinFailures >= 3}
+          label="Regalos de cumpleaños"
+          value={`${totals.gifts}`}
+          hint={`${formatSoles(totals.giftTotal)} en productos regalados`}
         />
       </div>
 
@@ -147,9 +155,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
             { label: "Ventas", className: "text-right" },
             { label: "Con descuento", className: "text-right" },
             { label: "Descuento dado", className: "text-right" },
-            { label: "Sin internet", className: "text-right" },
-            { label: "Claves fallidas", className: "text-right" },
-            { label: "Cambios de clave", className: "text-right" },
+            { label: "Regalos 🎂", className: "text-right" },
             { label: "Faltante en caja", className: "text-right" },
             { label: "Revisar" },
           ]}
@@ -173,10 +179,13 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
                   {formatSoles(row.discountTotal)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {row.offlineDiscountedSales}
+                  {row.giftSales}
+                  {row.giftTotal > 0 && (
+                    <span className="block text-xs text-muted-foreground">
+                      {formatSoles(row.giftTotal)}
+                    </span>
+                  )}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">{row.pinFailures}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.pinResets}</TableCell>
                 <TableCell
                   className={cn(
                     "text-right tabular-nums",
@@ -218,7 +227,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         />
         <DataTable
           columns={[
-            ID_COLUMN,
+            ORDER_COLUMN,
             { label: "Fecha" },
             { label: "Cajero" },
             { label: "Trabajador" },
@@ -231,7 +240,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         >
           {flagged.map((sale) => (
             <TableRow key={sale.saleId}>
-              <IdCell id={sale.saleId} />
+              <OrderCell id={sale.saleId} />
               <TableCell className="text-muted-foreground tabular-nums">
                 {dateTimeFormat.format(sale.clientCreatedAt)}
               </TableCell>
@@ -276,7 +285,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
       <section className="flex flex-col gap-3">
         <SectionTitle
           title="Registro de actividad"
-          description="Claves incorrectas, cambios de clave, aprobaciones y cambios del descuento. No se puede borrar."
+          description="Registros, aprobaciones, cambios del descuento y accesos fallidos a «Mis puntos». No se puede borrar."
         />
         <DataTable
           columns={[

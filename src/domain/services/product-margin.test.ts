@@ -21,11 +21,11 @@ describe("productMargin", () => {
 });
 
 describe("profitWithWorkerDiscount", () => {
-  it("a 10% worker discount on a 6.00 item bought at 4 leaves 1.40", () => {
-    assert.equal(profitWithWorkerDiscount(6, 4, 10), 1.4);
+  it("a S/ 0.60 worker discount on a 6.00 item bought at 4 leaves 1.40", () => {
+    assert.equal(profitWithWorkerDiscount(6, 4, 0.6), 1.4);
   });
 
-  it("a 50% discount sells it at a loss", () => {
-    assert.equal(profitWithWorkerDiscount(6, 4, 50), -1);
+  it("a S/ 3 discount sells it at a loss", () => {
+    assert.equal(profitWithWorkerDiscount(6, 4, 3), -1);
   });
 });

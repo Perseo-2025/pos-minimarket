@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CalendarClockIcon,
   ClipboardListIcon,
   IdCardIcon,
   LayoutDashboardIcon,
@@ -39,6 +40,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon },
   { href: "/admin/sales", label: "Ventas", icon: ReceiptTextIcon },
   { href: "/admin/caja", label: "Cierres de caja", icon: WalletIcon },
+  { href: "/admin/asistencia", label: "Asistencia", icon: CalendarClockIcon },
   { href: "/admin/categories", label: "Categorías", icon: TagsIcon },
   { href: "/admin/products", label: "Productos", icon: PackageIcon },
   { href: "/admin/compras", label: "Compras", icon: ClipboardListIcon },
@@ -69,14 +71,14 @@ export function AdminSidebar({ userName }: { userName: string }) {
             <SidebarMenuButton
               size="lg"
               render={<Link href="/admin" />}
-              tooltip="POS Minimarket"
+              tooltip="NAVEXPRESS"
             >
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
                 <StoreIcon className="size-4" />
               </div>
               <div className="grid flex-1 text-left leading-tight">
                 <span className="truncate font-heading font-semibold">
-                  POS Minimarket
+                  NAVEXPRESS
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
                   Administración

@@ -20,6 +20,13 @@ export async function userWithPermission(permission: Permission) {
   return session.user;
 }
 
+// Any logged-in user, whatever the role (e.g. marking attendance). Null
+// when there is no session.
+export async function currentUser() {
+  const session = await auth();
+  return session?.user ?? null;
+}
+
 // For layouts: not logged in → login; wrong role → that role's own screen.
 export async function requirePagePermission(permission: Permission) {
   const session = await auth();

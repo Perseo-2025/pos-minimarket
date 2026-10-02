@@ -20,11 +20,14 @@ export interface SaleItemInput {
   quantity: number;
   // Gross amount (unitPrice × quantity), before any discount.
   lineTotal: number;
-  // Worker discount on this line (0 when none) — see sale-pricing.ts.
-  discountPercent?: number;
+  // Worker discount on this line (0 when none) — see sale-pricing.ts:
+  // soles per unit (snapshot of the product setting) and the amount taken
+  // off lineTotal.
+  discountUnitAmount?: number;
   discountAmount?: number;
-  // Given away, approved by an admin at the till.
-  isCourtesy?: boolean;
+  // Given away whole: the worker's birthday gift (one unit). On older sales,
+  // a courtesy an admin approved at the till.
+  isGift?: boolean;
   captureSource?: CaptureSource | null;
 }
 
@@ -46,12 +49,8 @@ export interface SaleInput {
   // queued before this feature existed, carry none of it).
   workerId?: number;
   workerVerification?: WorkerVerification;
-  // Signed proof that the PIN was checked online (see worker-token).
-  verificationToken?: string;
   discountTotal?: number;
   policyId?: number;
-  // Signed admin approval covering the courtesy lines (see courtesy-token).
-  courtesyToken?: string;
 }
 
 // What is actually persisted, after the server re-priced and audited the
@@ -66,9 +65,7 @@ export interface SaleRecord {
   clientCreatedAt: string;
   subtotal: number;
   discountTotal: number;
-  discountPercent: number;
-  courtesyTotal: number;
-  courtesyApprovedBy: number | null;
+  giftTotal: number;
   total: number;
   workerId: number | null;
   policyId: number | null;
@@ -91,8 +88,9 @@ export interface Sale {
   paymentType: PaymentType;
   subtotal: number;
   discountTotal: number;
-  discountPercent: number;
-  courtesyTotal: number;
+  giftTotal: number;
+  // Only on older sales, whose free lines were courtesies an admin approved
+  // (null: the free line is a birthday gift).
   courtesyApprovedByName: string | null;
   total: number;
   workerId: number | null;

@@ -83,6 +83,8 @@
   --sidebar-accent-foreground: #0082a6;
   --sidebar-border: oklch(0.9 0 0);
   --sidebar-ring: #0082a6;
+  /* Height of the signature footer (AppFooter) on every screen. */
+  --app-footer-h: 2.25rem;
   --brand-orange: #f59e0b;
   --brand-blue: #0082a6;
 }
@@ -132,5 +134,120 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Splash after login (see splash-screen.tsx), "express" style: the logo
+   drives in from the left with speed lines and settles, a glint sweeps the
+   letters while the bar fills, and on leaving it speeds off to the right. */
+.splash-root {
+  animation: splash-in 250ms ease-out both;
+}
+.splash-root[data-leaving] {
+  animation: splash-out 450ms ease-in forwards;
+}
+.splash-logo {
+  animation: splash-drive-in 800ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+.splash-root[data-leaving] .splash-logo {
+  animation: splash-drive-out 450ms cubic-bezier(0.55, 0, 0.9, 0.4) forwards;
+}
+.splash-streak {
+  position: absolute;
+  right: 0;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to left, rgba(250, 238, 212, 0.9), rgba(250, 238, 212, 0));
+  opacity: 0;
+  animation: splash-streak 650ms ease-out both;
+}
+.splash-shine {
+  background: linear-gradient(
+    105deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.85) 50%,
+    transparent 62%
+  );
+  background-size: 260% 100%;
+  background-position: 150% 0;
+  mask: url("/navexpress.png") center / 100% 100% no-repeat;
+  -webkit-mask: url("/navexpress.png") center / 100% 100% no-repeat;
+  mix-blend-mode: soft-light;
+  animation: splash-shine 1.1s ease-in-out 900ms both;
+}
+.splash-loader {
+  animation: splash-rise 400ms ease-out 700ms both;
+}
+.splash-bar {
+  animation: splash-fill 1.5s cubic-bezier(0.4, 0, 0.2, 1) 700ms both;
+}
+
+@keyframes splash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes splash-out {
+  0%, 40% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes splash-drive-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-70vw) skewX(-18deg);
+    filter: blur(6px);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(14px) skewX(8deg);
+    filter: blur(0);
+  }
+  80% { transform: translateX(-5px) skewX(-3deg); }
+  100% { transform: translateX(0) skewX(0); }
+}
+@keyframes splash-drive-out {
+  0% { transform: translateX(0) skewX(0); }
+  25% { transform: translateX(-12px) skewX(6deg); }
+  100% {
+    opacity: 0;
+    transform: translateX(70vw) skewX(-18deg);
+    filter: blur(6px);
+  }
+}
+@keyframes splash-streak {
+  0% { opacity: 0; transform: translateX(80%); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-60%); }
+}
+@keyframes splash-shine {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+@keyframes splash-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Fills to 90% in the minimum time; the screen leaves when the next view is
+   ready, so a slow connection never shows a "full" bar that hangs. */
+@keyframes splash-fill {
+  from { width: 0%; }
+  to { width: 90%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-root,
+  .splash-root[data-leaving],
+  .splash-logo,
+  .splash-root[data-leaving] .splash-logo,
+  .splash-loader,
+  .splash-bar,
+  .splash-shine,
+  .splash-streak {
+    animation: none;
+  }
+  .splash-streak {
+    display: none;
+  }
+  .splash-bar {
+    width: 90%;
   }
 }

@@ -19,10 +19,10 @@ import { Label } from "@/components/ui/label";
 import { formatSoles } from "@/lib/money";
 
 export type PolicyView = {
-  discountPercent: number;
+  maxDiscountedUnitsPerSale: number;
   maxDiscountedSalesPerDay: number;
-  maxDiscountPerMonth: number;
   pointsPerSol: number;
+  birthdayGiftMaxAmount: number;
   createdAt: string;
   createdByName: string | null;
 };
@@ -51,19 +51,29 @@ export function DiscountPolicyCard({
         {active ? (
           <ul className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
             <li>
-              Descuento <strong>según cada producto</strong> (
+              Descuento en soles <strong>según cada producto</strong> (
               <Link href="/admin/products" className="underline">
                 Productos
               </Link>
               )
             </li>
             <li>
+              En las primeras <strong>{active.maxDiscountedUnitsPerSale}</strong>{" "}
+              unidades de cada compra
+            </li>
+            <li>
               Máx. <strong>{active.maxDiscountedSalesPerDay}</strong> compras con
               descuento por día
             </li>
             <li>
-              Tope de <strong>{formatSoles(active.maxDiscountPerMonth)}</strong> de
-              descuento al mes
+              {active.birthdayGiftMaxAmount > 0 ? (
+                <>
+                  Regalo de cumpleaños hasta{" "}
+                  <strong>{formatSoles(active.birthdayGiftMaxAmount)}</strong>
+                </>
+              ) : (
+                "Sin regalo de cumpleaños"
+              )}
             </li>
             <li>
               <strong>{active.pointsPerSol}</strong> punto(s) por cada S/ 1
@@ -96,17 +106,19 @@ function PolicyDialog({
   versions: PolicyView[];
 }) {
   const [isPending, startTransition] = useTransition();
+  const [units, setUnits] = useState(String(active?.maxDiscountedUnitsPerSale ?? 3));
   const [perDay, setPerDay] = useState(String(active?.maxDiscountedSalesPerDay ?? 2));
-  const [perMonth, setPerMonth] = useState(String(active?.maxDiscountPerMonth ?? 150));
   const [points, setPoints] = useState(String(active?.pointsPerSol ?? 1));
+  const [gift, setGift] = useState(String(active?.birthdayGiftMaxAmount ?? 10));
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     startTransition(async () => {
       const result = await updateDiscountPolicy({
+        maxDiscountedUnitsPerSale: Number(units),
         maxDiscountedSalesPerDay: Number(perDay),
-        maxDiscountPerMonth: Number(perMonth),
         pointsPerSol: Number(points),
+        birthdayGiftMaxAmount: Number(gift),
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -125,14 +137,24 @@ function PolicyDialog({
         <DialogHeader>
           <DialogTitle>Reglas del descuento para trabajadores</DialogTitle>
           <DialogDescription>
-            El porcentaje de descuento se configura en cada producto. Aquí
-            van los topes y los puntos. Los cambios se guardan como una versión
+            El monto de descuento (en soles) se configura en cada producto.
+            Aquí van los límites, el regalo de cumpleaños y los puntos. Los cambios se guardan como una versión
             nueva: las ventas anteriores conservan la regla con la que se
             cobraron.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              id="units"
+              label="Unidades con descuento por compra"
+              hint="Ej. 3: si lleva 5 gaseosas, 3 van con descuento y 2 a precio normal."
+              value={units}
+              onChange={setUnits}
+              step="1"
+              min="1"
+              max="20"
+            />
             <Field
               id="per-day"
               label="Compras con descuento por día"
@@ -144,13 +166,14 @@ function PolicyDialog({
               max="50"
             />
             <Field
-              id="per-month"
-              label="Tope de descuento al mes (S/)"
-              hint="Máximo que puede ahorrar un trabajador en el mes."
-              value={perMonth}
-              onChange={setPerMonth}
-              step="1"
+              id="gift"
+              label="Regalo de cumpleaños hasta (S/)"
+              hint="Un producto gratis el día de su cumpleaños, una vez al año. 0 = sin regalo."
+              value={gift}
+              onChange={setGift}
+              step="0.5"
               min="0"
+              max="500"
             />
             <Field
               id="points"
@@ -173,10 +196,9 @@ function PolicyDialog({
                 {versions.map((v) => (
                   <li key={v.createdAt} className="flex justify-between gap-3">
                     <span>
-                      {/* Versions from before per-product discounts had a global %. */}
-                      {v.discountPercent > 0 && `${v.discountPercent}% · `}
-                      {v.maxDiscountedSalesPerDay}/día ·{" "}
-                      {formatSoles(v.maxDiscountPerMonth)}/mes · {v.pointsPerSol} pt/S/1
+                      {v.maxDiscountedUnitsPerSale} unid./compra ·{" "}
+                      {v.maxDiscountedSalesPerDay}/día · regalo{" "}
+                      {formatSoles(v.birthdayGiftMaxAmount)} · {v.pointsPerSol} pt/S/1
                     </span>
                     <span className="shrink-0">
                       {dateFormat.format(new Date(v.createdAt))}

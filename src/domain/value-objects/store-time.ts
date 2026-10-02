@@ -22,6 +22,12 @@ export function storeMonthStart(date: Date) {
   );
 }
 
+export function storeYearStart(date: Date) {
+  return new Date(
+    `${storeDateKey(date).slice(0, 4)}-01-01T00:00:00.000${STORE_UTC_OFFSET}`,
+  );
+}
+
 export function storeDayRange(dateKey: string) {
   return {
     from: new Date(`${dateKey}T00:00:00.000${STORE_UTC_OFFSET}`),

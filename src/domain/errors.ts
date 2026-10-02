@@ -55,24 +55,23 @@ export class WorkerAlreadyExistsError extends Error {
   }
 }
 
-export class InvalidPinError extends Error {
-  constructor(
-    public readonly attemptsLeft: number,
-    message = "Clave incorrecta",
-  ) {
+// "Mis puntos": the DNI and birth date don't match a worker. Never says which
+// one was wrong, so the page can't be used to find out who is registered.
+export class InvalidWorkerCredentialsError extends Error {
+  constructor(message = "DNI o fecha de nacimiento incorrectos") {
     super(message);
-    this.name = "InvalidPinError";
+    this.name = "InvalidWorkerCredentialsError";
   }
 }
 
-// Too many wrong PINs in a short time: blocks brute-forcing at the till.
-export class PinLockedError extends Error {
+// Too many wrong attempts in a short time: blocks guessing birth dates.
+export class TooManyAttemptsError extends Error {
   constructor(
     public readonly minutes: number,
     message = `Demasiados intentos. Espera ${minutes} minutos.`,
   ) {
     super(message);
-    this.name = "PinLockedError";
+    this.name = "TooManyAttemptsError";
   }
 }
 
@@ -96,14 +95,5 @@ export class IdentityServiceUnavailableError extends Error {
   constructor(message = "Servicio de consulta DNI no disponible") {
     super(message);
     this.name = "IdentityServiceUnavailableError";
-  }
-}
-
-// Courtesy approval: the credentials typed at the till are not those of an
-// active admin.
-export class InvalidAdminCredentialsError extends Error {
-  constructor() {
-    super("Usuario o contraseña de administrador incorrectos");
-    this.name = "InvalidAdminCredentialsError";
   }
 }

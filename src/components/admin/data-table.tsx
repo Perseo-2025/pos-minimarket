@@ -26,6 +26,16 @@ export function IdCell({ id }: { id: number }) {
   );
 }
 
+// Sales show their id as the order number: the autoincrement id the
+// server gives on sync, the one to look a purchase up by.
+export const ORDER_COLUMN: DataTableColumn = { label: "N° Orden", className: "w-20" };
+
+export function OrderCell({ id }: { id: number }) {
+  return (
+    <TableCell className="font-mono text-sm font-medium tabular-nums">#{id}</TableCell>
+  );
+}
+
 // Shared chrome for every admin table: bordered card, muted header, empty
 // state and a footer slot (pagination). Rows are rendered by the caller.
 export function DataTable({

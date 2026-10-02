@@ -16,7 +16,7 @@ import { formatSoles } from "@/lib/money";
 type SummarySale = {
   total: number;
   discountTotal: number;
-  courtesyTotal: number;
+  giftTotal: number;
   paymentType: PaymentType;
   units: number;
 };
@@ -48,7 +48,7 @@ export function SalesSummary({ sales }: { sales: SummarySale[] }) {
   const units = sales.reduce((sum, s) => sum + s.units, 0);
   const discount = round2(sales.reduce((sum, s) => sum + s.discountTotal, 0));
   const discounted = sales.filter((s) => s.discountTotal > 0).length;
-  const courtesy = round2(sales.reduce((sum, s) => sum + s.courtesyTotal, 0));
+  const gifts = round2(sales.reduce((sum, s) => sum + s.giftTotal, 0));
   const average = sales.length > 0 ? round2(total / sales.length) : 0;
 
   const byPayment = PAYMENT_TYPES.map((type) => {
@@ -72,18 +72,18 @@ export function SalesSummary({ sales }: { sales: SummarySale[] }) {
           (discount > 0
             ? ` · ${formatSoles(discount)} de descuento en ${discounted} ${discounted === 1 ? "venta" : "ventas"} a trabajadores`
             : "") +
-          (courtesy > 0 ? ` · ${formatSoles(courtesy)} regalados en cortesías` : "")
+          (gifts > 0 ? ` · ${formatSoles(gifts)} en regalos de cumpleaños` : "")
         }
       />
       <Metric
-        label="Ticket promedio"
+        label="Promedio por orden"
         value={formatSoles(average)}
         hint="Importe medio por venta"
       />
       <Metric
         label="Productos vendidos"
         value={units.toLocaleString("es-PE")}
-        hint="Unidades en todos los tickets"
+        hint="Unidades en todas las órdenes"
       />
       <Card>
         <CardHeader>

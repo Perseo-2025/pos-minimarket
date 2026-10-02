@@ -2,7 +2,6 @@ import "./load-env";
 
 import { hash } from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { hashPin } from "../security/pin-hash";
 import { db } from "./client";
 import { discountPolicies, users, workers } from "./schema";
 
@@ -42,13 +41,15 @@ async function seedDiscountPolicy() {
   }
 
   await db.insert(discountPolicies).values({
-    discountPercent: "10.00",
+    maxDiscountedUnitsPerSale: 3,
     maxDiscountedSalesPerDay: 2,
-    maxDiscountPerMonth: "150.00",
+    birthdayGiftMaxAmount: "10.00",
     pointsPerSol: "1.00",
     isActive: true,
   });
-  console.log("Política de descuento sembrada: 10%, 2 compras/día, S/ 150/mes, 1 punto por S/ 1");
+  console.log(
+    "Política de descuento sembrada: 3 unidades/compra, 2 compras/día, regalo hasta S/ 10, 1 punto por S/ 1",
+  );
 }
 
 // Two sample airport workers to try the flow from the POS.
@@ -58,7 +59,6 @@ async function seedWorkers() {
     .from(users)
     .where(eq(users.username, "Admin2026"))
     .limit(1);
-  const pinHash = await hashPin("123456");
 
   await db
     .insert(workers)
@@ -68,7 +68,7 @@ async function seedWorkers() {
         fullName: "JUAN PÉREZ QUISPE",
         nameSource: "api",
         company: "Seguridad Aeroportuaria",
-        pinHash,
+        birthDate: "1990-10-02",
         status: "active",
         pendingReason: null,
         registeredBy: admin?.id,
@@ -80,7 +80,7 @@ async function seedWorkers() {
         fullName: "ROSA FLORES RAMOS",
         nameSource: "manual",
         company: "LATAM Airlines",
-        pinHash,
+        birthDate: "1995-03-15",
         status: "pending",
         pendingReason: "new",
         registeredBy: admin?.id,
@@ -89,7 +89,7 @@ async function seedWorkers() {
     .onConflictDoNothing({ target: workers.dni });
 
   console.log(
-    "Trabajadores del aeropuerto sembrados: 45678912 (activo) y 70112233 (pendiente). Clave de ambos: 123456",
+    "Trabajadores del aeropuerto sembrados: 45678912 (activo, cumple el 02/10) y 70112233 (pendiente)",
   );
 }
 

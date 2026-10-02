@@ -1,19 +1,20 @@
 // An airport worker: a *customer* entitled to the staff discount. Not to be
 // confused with the minimarket's own cashiers (User with role "cashier") —
-// workers never log into the POS, they identify at the till with their DNI
-// plus a 6-digit PIN only they know.
+// workers never log into the POS. At the till the cashier types their DNI
+// and checks it against the worker's fotocheck (it carries no barcode).
 export type WorkerStatus = "pending" | "active" | "suspended" | "rejected";
 
-// Why a worker is waiting for the admin: a brand-new registration, or a PIN
-// change requested at the till (a cashier could otherwise set a PIN they know).
+// Why a worker is waiting for the admin. "pin_reset" only appears on records
+// from when workers had a PIN.
 export type WorkerPendingReason = "new" | "pin_reset";
 
 // Where the full name came from: the DNI lookup service (trusted) or typed
 // by the cashier because the service was unreachable (admin double-checks).
 export type WorkerNameSource = "api" | "manual";
 
-// How the worker proved presence for a discounted sale.
-export type WorkerVerification = "none" | "pin_online" | "pin_offline";
+// How the worker was identified for a discounted sale. Today it is always
+// "dni_manual"; the pin_* values remain on sales from when workers had a PIN.
+export type WorkerVerification = "none" | "dni_manual" | "pin_online" | "pin_offline";
 
 export const WORKER_STATUS_LABELS: Record<WorkerStatus, string> = {
   pending: "Pendiente",
@@ -29,13 +30,12 @@ export const WORKER_PENDING_REASON_LABELS: Record<WorkerPendingReason, string> =
 
 export const WORKER_VERIFICATION_LABELS: Record<WorkerVerification, string> = {
   none: "Sin verificar",
+  dni_manual: "DNI digitado por el cajero",
   pin_online: "Clave verificada en línea",
   pin_offline: "Clave verificada sin conexión",
 };
 
 export const DNI_PATTERN = /^\d{8}$/;
-export const PIN_LENGTH = 6;
-export const PIN_PATTERN = /^\d{6}$/;
 
 export interface Worker {
   id: number;
@@ -45,6 +45,9 @@ export interface Worker {
   fullName: string;
   nameSource: WorkerNameSource;
   company: string;
+  // YYYY-MM-DD. Null for workers registered before it was asked: no birthday
+  // gift until the admin fills it in.
+  birthDate: string | null;
   status: WorkerStatus;
   pendingReason: WorkerPendingReason | null;
   pointsBalance: number;
@@ -54,22 +57,11 @@ export interface Worker {
   createdAt: Date;
 }
 
-// Stored PIN hash is never part of Worker; only repositories and the offline
-// snapshot (active workers only) ever see it.
-export interface WorkerWithPin extends Worker {
-  pinHash: string;
-}
-
-export function withoutPin(worker: WorkerWithPin): Worker {
-  const safe: Partial<WorkerWithPin> = { ...worker };
-  delete safe.pinHash;
-  return safe as Worker;
-}
-
-// Discount usage used to enforce the daily/monthly caps.
+// What the worker already used: discounted purchases today (daily cap) and
+// whether the birthday gift was given this year (once a year).
 export interface WorkerDiscountUsage {
   discountedSalesToday: number;
-  discountThisMonth: number;
+  giftUsedThisYear: boolean;
 }
 
 export interface WorkerPurchase {
@@ -78,6 +70,7 @@ export interface WorkerPurchase {
   cashierName: string | null;
   subtotal: number;
   discountTotal: number;
+  giftTotal: number;
   total: number;
   pointsEarned: number;
   auditFlags: string[];

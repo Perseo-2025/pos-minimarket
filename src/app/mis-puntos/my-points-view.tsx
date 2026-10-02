@@ -3,6 +3,7 @@
 import { AlertTriangleIcon, LogOutIcon, SparklesIcon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { getMyPoints } from "@/actions/workers";
+import { BirthDateInput } from "@/components/birth-date-input";
 import type { WorkerStatement } from "@/application/use-cases/workers/get-worker-statement";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,7 +27,9 @@ const dateTimeFormat = new Intl.DateTimeFormat("es-PE", {
 export function MyPointsView() {
   const [isPending, startTransition] = useTransition();
   const [dni, setDni] = useState("");
-  const [pin, setPin] = useState("");
+  const [birthDate, setBirthDate] = useState<string | null>(null);
+  // Remounts the date field to clear it after each attempt.
+  const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [statement, setStatement] = useState<WorkerStatement | null>(null);
 
@@ -34,8 +37,9 @@ export function MyPointsView() {
     event.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await getMyPoints({ dni, pin });
-      setPin("");
+      const result = await getMyPoints({ dni, birthDate });
+      setBirthDate(null);
+      setAttempt((n) => n + 1);
       if (result.ok) setStatement(result.data);
       else setError(result.error);
     });
@@ -69,12 +73,19 @@ export function MyPointsView() {
                 {statement.purchases.map((purchase) => (
                   <li key={purchase.saleId} className="flex justify-between gap-3 p-3 text-sm">
                     <div>
-                      <p>{dateTimeFormat.format(new Date(purchase.clientCreatedAt))}</p>
+                      <p>
+                        <span className="font-mono font-medium">Orden #{purchase.saleId}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {dateTimeFormat.format(new Date(purchase.clientCreatedAt))}
+                        </span>
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {purchase.discountTotal > 0
                           ? `Ahorraste ${formatSoles(purchase.discountTotal)}`
-                          : "Sin descuento"}{" "}
-                        · +{purchase.pointsEarned} pts
+                          : "Sin descuento"}
+                        {purchase.giftTotal > 0 && " · regalo de cumpleaños 🎂"} · +
+                        {purchase.pointsEarned} pts
                       </p>
                     </div>
                     <span className="font-semibold tabular-nums">
@@ -108,8 +119,8 @@ export function MyPointsView() {
       <CardHeader>
         <CardTitle className="text-2xl font-heading">Mis puntos</CardTitle>
         <CardDescription>
-          Para trabajadores del aeropuerto. Ingresa tu DNI y la clave de 6 números
-          que usas en caja.
+          Para trabajadores del aeropuerto. Ingresa tu DNI y tu fecha de
+          nacimiento.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -127,20 +138,11 @@ export function MyPointsView() {
             />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="pin">Clave</Label>
-            <Input
-              id="pin"
-              type="password"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={6}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              required
-            />
+            <Label htmlFor="birth-date">Fecha de nacimiento</Label>
+            <BirthDateInput key={attempt} id="birth-date" onChange={setBirthDate} />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={isPending || dni.length !== 8 || pin.length !== 6}>
+          <Button type="submit" disabled={isPending || dni.length !== 8 || birthDate === null}>
             {isPending ? "Consultando…" : "Ver mis puntos"}
           </Button>
         </form>

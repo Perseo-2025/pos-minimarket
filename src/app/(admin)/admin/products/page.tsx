@@ -130,7 +130,7 @@ async function ProductsContent({ categoryParam }: { categoryParam: unknown }) {
             priceSale: p.priceSale.toString(),
             priceCost: p.priceCost === null ? null : p.priceCost.toString(),
             tracksExpiry: p.tracksExpiryOverride,
-            workerDiscountPercent: p.workerDiscountPercent,
+            workerDiscountAmount: p.workerDiscountAmount,
             stock: stockById.get(p.id) ?? null,
             presentations: presentations.filter((x) => x.productId === p.id),
             imageUrl: p.imageUrl,

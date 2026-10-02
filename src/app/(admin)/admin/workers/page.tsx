@@ -27,10 +27,10 @@ const EMPTY_MESSAGES: Record<WorkerStatus, string> = {
 
 function toPolicyView(policy: DiscountPolicy): PolicyView {
   return {
-    discountPercent: policy.discountPercent,
+    maxDiscountedUnitsPerSale: policy.maxDiscountedUnitsPerSale,
     maxDiscountedSalesPerDay: policy.maxDiscountedSalesPerDay,
-    maxDiscountPerMonth: policy.maxDiscountPerMonth,
     pointsPerSol: policy.pointsPerSol,
+    birthdayGiftMaxAmount: policy.birthdayGiftMaxAmount,
     createdAt: policy.createdAt.toISOString(),
     createdByName: policy.createdByName ?? null,
   };
@@ -39,7 +39,7 @@ function toPolicyView(policy: DiscountPolicy): PolicyView {
 const HOW_IT_WORKS = [
   {
     title: "1. El cajero registra",
-    body: "Con el DNI del trabajador. El trabajador crea su propia clave de 6 números.",
+    body: "Con el DNI, la empresa y la fecha de nacimiento del trabajador (de su DNI).",
   },
   {
     title: "2. Tú apruebas",
@@ -47,7 +47,7 @@ const HOW_IT_WORKS = [
   },
   {
     title: "3. Descuento en caja",
-    body: "En cada compra el trabajador digita su clave. El cajero nunca la conoce.",
+    body: "El cajero escribe su DNI, revisa el fotocheck y el descuento sale en la cesta. En su cumpleaños, un regalo.",
   },
 ];
 
@@ -80,6 +80,7 @@ async function WorkersContent({ statusParam }: { statusParam: unknown }) {
           fullName: w.fullName,
           nameSource: w.nameSource,
           company: w.company,
+          birthDate: w.birthDate,
           status: w.status,
           pendingReason: w.pendingReason,
           pointsBalance: w.pointsBalance,

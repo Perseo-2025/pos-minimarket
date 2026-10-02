@@ -12,10 +12,10 @@ type PolicyRow = typeof discountPolicies.$inferSelect;
 function toPolicy(row: PolicyRow, createdByName: string | null = null): DiscountPolicy {
   return {
     id: row.id,
-    discountPercent: Number(row.discountPercent),
+    maxDiscountedUnitsPerSale: row.maxDiscountedUnitsPerSale,
     maxDiscountedSalesPerDay: row.maxDiscountedSalesPerDay,
-    maxDiscountPerMonth: Number(row.maxDiscountPerMonth),
     pointsPerSol: Number(row.pointsPerSol),
+    birthdayGiftMaxAmount: Number(row.birthdayGiftMaxAmount),
     isActive: row.isActive,
     createdById: row.createdBy,
     createdByName,
@@ -63,10 +63,10 @@ export class DrizzleDiscountPolicyRepository implements DiscountPolicyRepository
       const [row] = await tx
         .insert(discountPolicies)
         .values({
-          discountPercent: data.discountPercent.toFixed(2),
+          maxDiscountedUnitsPerSale: data.maxDiscountedUnitsPerSale,
           maxDiscountedSalesPerDay: data.maxDiscountedSalesPerDay,
-          maxDiscountPerMonth: data.maxDiscountPerMonth.toFixed(2),
           pointsPerSol: data.pointsPerSol.toFixed(2),
+          birthdayGiftMaxAmount: data.birthdayGiftMaxAmount.toFixed(2),
           isActive: true,
           createdBy: actorId,
         })

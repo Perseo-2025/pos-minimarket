@@ -1,8 +1,7 @@
 import type { WorkerNameSource } from "@/domain/entities/worker";
-import { ValidationError, WorkerAlreadyExistsError } from "@/domain/errors";
+import { WorkerAlreadyExistsError } from "@/domain/errors";
 import type { AuditRepository } from "@/domain/repositories/audit-repository";
 import type { IdentityLookup } from "@/domain/repositories/identity-lookup";
-import type { PinHasher } from "@/domain/repositories/pin-hasher";
 import type { WorkerRepository } from "@/domain/repositories/worker-repository";
 import { workerRegisterSchema } from "@/application/validation/worker";
 import { withTimeout } from "./lookup-dni";
@@ -14,17 +13,12 @@ export async function registerWorkerUseCase(
     workers: WorkerRepository;
     audit: AuditRepository;
     identity: IdentityLookup;
-    pinHasher: PinHasher;
   },
   input: unknown,
   actorId: number,
   lookupTimeoutMs: number,
 ) {
   const data = workerRegisterSchema.parse(input);
-
-  if (!deps.pinHasher.isValidHash(data.pinHash)) {
-    throw new ValidationError("La clave no es válida");
-  }
 
   const existing = await deps.workers.findByDni(data.dni);
   if (existing) {
@@ -59,7 +53,7 @@ export async function registerWorkerUseCase(
     fullName,
     nameSource,
     company: data.company,
-    pinHash: data.pinHash,
+    birthDate: data.birthDate,
     registeredById: actorId,
   });
 

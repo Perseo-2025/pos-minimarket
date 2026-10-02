@@ -141,6 +141,27 @@
       "when": 1790918965497,
       "tag": "0019_barcode_capture_source",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790953665011,
+      "tag": "0020_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790963482636,
+      "tag": "0021_worker_discount_soles",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790963506227,
+      "tag": "0022_drop_worker_pin",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,9 @@ import {
   openShiftUseCase,
   recordCashMovementUseCase,
 } from "@/application/use-cases/cash/cash-shifts";
+import { auditShiftOpeningUseCase } from "@/application/use-cases/attendance/clock";
 import { userWithPermission } from "@/infrastructure/auth/guards";
+import { attendanceDeps } from "@/infrastructure/deps";
 import { cashShiftRepository } from "@/infrastructure/repositories";
 import {
   readJson,
@@ -26,6 +28,11 @@ export async function POST(request: Request) {
     switch (body?.op) {
       case "open":
         await openShiftUseCase(cashShiftRepository, body.data, actor);
+        await auditShiftOpeningUseCase(
+          attendanceDeps,
+          body.data as { uuid: string; openedAt: string },
+          actor,
+        );
         break;
       case "movement":
         await recordCashMovementUseCase(cashShiftRepository, body.data, actor);

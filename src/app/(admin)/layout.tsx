@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { AdminSidebar } from "@/components/layout/admin-sidebar";
+import { AppFooter } from "@/components/layout/app-footer";
 import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
@@ -37,6 +38,7 @@ export default async function AdminLayout({
             </span>
           </header>
           <div className="flex-1 p-4 md:p-6">{children}</div>
+          <AppFooter />
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

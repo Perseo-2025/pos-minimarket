@@ -5,15 +5,16 @@ import {
   ArrowLeftIcon,
   BadgeCheckIcon,
   BanIcon,
+  CakeIcon,
   CheckCircle2Icon,
   CloudOffIcon,
   IdCardIcon,
   Loader2Icon,
-  MonitorSmartphoneIcon,
   SearchIcon,
   UserPlusIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { BirthDateInput } from "@/components/birth-date-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,22 +25,20 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { WorkerDiscountUsage } from "@/domain/entities/worker";
-import { DNI_PATTERN } from "@/domain/entities/worker";
-import { lookupDniOnline, verifyPinOnline } from "@/infrastructure/offline/worker-api";
+import { DNI_PATTERN, type WorkerDiscountUsage } from "@/domain/entities/worker";
+import { birthdayGiftAvailable } from "@/domain/services/birthday";
+import { birthDateSchema } from "@/application/validation/worker";
+import { lookupDniOnline } from "@/infrastructure/offline/worker-api";
 import {
   findWorkerLocally,
   getWorkerSnapshot,
   localDiscountUsage,
-  markWorkerPendingLocally,
   refreshWorkerSnapshot,
-  verifyPinOffline,
 } from "@/infrastructure/offline/worker-cache";
 import { submitWorkerOp, WorkerOpRejectedError } from "@/infrastructure/offline/worker-ops";
-import type { CachedWorker } from "@/infrastructure/offline/types";
-import { hashPin } from "@/infrastructure/security/pin-hash";
+import type { CachedPolicy, CachedWorker } from "@/infrastructure/offline/types";
+import { formatSoles } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import { PinPad } from "./pin-pad";
 
 // The worker identified at the till, attached to the current sale only.
 export type AppliedWorker = {
@@ -47,60 +46,17 @@ export type AppliedWorker = {
   dni: string;
   fullName: string;
   company: string;
+  birthDate: string | null;
   pointsBalance: number;
-  verification: "pin_online" | "pin_offline";
-  token?: string;
   usage: WorkerDiscountUsage;
-  verifiedAt: number;
 };
-
-type Flow = "identify" | "register" | "reset";
 
 type Step =
   | { name: "dni" }
-  | { name: "pin"; worker: CachedWorker }
+  | { name: "confirm"; worker: CachedWorker; policy: CachedPolicy; usage: WorkerDiscountUsage }
   | { name: "not_registered" }
   | { name: "register_form" }
-  | { name: "register_pin" }
-  | { name: "register_confirm"; firstPin: string }
-  | { name: "reset_intro"; worker: CachedWorker }
-  | { name: "reset_pin"; worker: CachedWorker }
-  | { name: "reset_confirm"; worker: CachedWorker; firstPin: string }
   | { name: "message"; tone: "success" | "warning" | "danger"; title: string; body: string };
-
-const FLOW_STEPS: Record<Flow, string[]> = {
-  identify: ["DNI", "Clave del trabajador"],
-  register: ["Datos", "Crear clave", "Listo"],
-  reset: ["Nueva clave", "Confirmar", "Listo"],
-};
-
-function stepPosition(step: Step): { flow: Flow; index: number } | null {
-  switch (step.name) {
-    case "dni":
-    case "not_registered":
-      return { flow: "identify", index: 0 };
-    case "pin":
-      return { flow: "identify", index: 1 };
-    case "register_form":
-      return { flow: "register", index: 0 };
-    case "register_pin":
-    case "register_confirm":
-      return { flow: "register", index: 1 };
-    case "reset_intro":
-    case "reset_pin":
-      return { flow: "reset", index: 0 };
-    case "reset_confirm":
-      return { flow: "reset", index: 1 };
-    default:
-      return null;
-  }
-}
-
-const TITLES: Record<Flow, string> = {
-  identify: "Descuento para trabajador del aeropuerto",
-  register: "Registrar trabajador del aeropuerto",
-  reset: "Cambiar clave del trabajador",
-};
 
 type NameLookup = "loading" | "api" | "manual_not_found" | "manual_unavailable";
 
@@ -111,29 +67,30 @@ export function WorkerDiscountDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onApplied: (worker: AppliedWorker) => void;
+  onApplied: (worker: AppliedWorker, policy: CachedPolicy) => void;
 }) {
   const [step, setStep] = useState<Step>({ name: "dni" });
   const [dni, setDni] = useState("");
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Typing the 8th digit searches right away; this stops a double search
+  // when the cashier also presses Enter.
+  const searching = useRef(false);
 
   // Registration form.
   const [fullName, setFullName] = useState("");
   const [company, setCompany] = useState("");
+  const [birthDate, setBirthDate] = useState<string | null>(null);
   const [nameLookup, setNameLookup] = useState<NameLookup>("loading");
 
   function reset() {
     setStep({ name: "dni" });
     setDni("");
-    setPin("");
-    setPinError(null);
     setBusy(false);
     setFormError(null);
     setFullName("");
     setCompany("");
+    setBirthDate(null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -142,163 +99,119 @@ export function WorkerDiscountDialog({
   }
 
   function goTo(next: Step) {
-    setPin("");
-    setPinError(null);
     setFormError(null);
     setStep(next);
   }
 
-  // ── Step 1: find the worker by DNI ───────────────────────────────────────
-  async function searchDni() {
-    if (!DNI_PATTERN.test(dni)) {
+  // ── Find the worker by DNI ───────────────────────────────────────────────
+  async function searchDni(value: string) {
+    if (!DNI_PATTERN.test(value)) {
       setFormError("El DNI debe tener 8 números.");
       return;
     }
+    if (searching.current) return;
+    searching.current = true;
     setBusy(true);
     setFormError(null);
 
-    let result = await findWorkerLocally(dni);
-    if (result.kind === "unknown" && navigator.onLine) {
-      // Maybe registered from another till since the last refresh.
-      await refreshWorkerSnapshot({ force: true });
-      result = await findWorkerLocally(dni);
-    }
-    const snapshot = await getWorkerSnapshot();
-    setBusy(false);
+    try {
+      // Fresh usage when there is internet (another till may have sold to
+      // this worker); throttled, and skipped offline.
+      await refreshWorkerSnapshot();
+      let result = await findWorkerLocally(value);
+      if (result.kind === "unknown" && navigator.onLine) {
+        // Maybe registered from another till since the last refresh.
+        await refreshWorkerSnapshot({ force: true });
+        result = await findWorkerLocally(value);
+      }
+      const snapshot = await getWorkerSnapshot();
 
-    if (result.kind === "queued") {
-      goTo({
-        name: "message",
-        tone: "warning",
-        title: "Registro aún sin enviar",
-        body: "Este DNI se registró en esta tablet sin internet. Cuando vuelva la conexión se enviará, y el administrador deberá aprobarlo. Mientras tanto, la compra va sin descuento.",
-      });
-      return;
-    }
-
-    if (result.kind === "unknown") {
-      if (!snapshot && !navigator.onLine) {
+      if (result.kind === "queued") {
         goTo({
           name: "message",
           tone: "warning",
-          title: "Sin datos de trabajadores",
-          body: "Esta tablet todavía no descargó la lista de trabajadores. Conéctate a internet al menos una vez y vuelve a intentar. Puedes cobrar sin descuento.",
+          title: "Registro aún sin enviar",
+          body: "Este DNI se registró en esta tablet sin internet. Cuando vuelva la conexión se enviará, y el administrador deberá aprobarlo. Mientras tanto, la compra va sin descuento.",
         });
         return;
       }
-      goTo({ name: "not_registered" });
-      return;
-    }
 
-    const worker = result.worker;
-    if (worker.status === "pending") {
-      goTo({
-        name: "message",
-        tone: "warning",
-        title: `${worker.fullName} está pendiente de aprobación`,
-        body: "El administrador aún no aprueba su registro o su cambio de clave. Mientras tanto, sus compras van sin descuento.",
-      });
-      return;
-    }
-    if (worker.status !== "active") {
-      goTo({
-        name: "message",
-        tone: "danger",
-        title: `${worker.fullName} no tiene descuento`,
-        body: "El administrador suspendió el descuento de este trabajador. Cobra la compra a precio normal.",
-      });
-      return;
-    }
-    if (!snapshot?.policy) {
-      goTo({
-        name: "message",
-        tone: "warning",
-        title: "Descuento no configurado",
-        body: "El administrador aún no configuró el descuento para trabajadores. Cobra a precio normal.",
-      });
-      return;
-    }
+      if (result.kind === "unknown") {
+        if (!snapshot && !navigator.onLine) {
+          goTo({
+            name: "message",
+            tone: "warning",
+            title: "Sin datos de trabajadores",
+            body: "Esta tablet todavía no descargó la lista de trabajadores. Conéctate a internet al menos una vez y vuelve a intentar. Puedes cobrar sin descuento.",
+          });
+          return;
+        }
+        goTo({ name: "not_registered" });
+        return;
+      }
 
-    goTo({ name: "pin", worker });
+      const worker = result.worker;
+      if (worker.status === "pending") {
+        goTo({
+          name: "message",
+          tone: "warning",
+          title: `${worker.fullName} está pendiente de aprobación`,
+          body: "El administrador aún no aprueba su registro. Mientras tanto, sus compras van sin descuento.",
+        });
+        return;
+      }
+      if (worker.status !== "active") {
+        goTo({
+          name: "message",
+          tone: "danger",
+          title: `${worker.fullName} no tiene descuento`,
+          body: "El administrador suspendió el descuento de este trabajador. Cobra la compra a precio normal.",
+        });
+        return;
+      }
+      if (!snapshot?.policy) {
+        goTo({
+          name: "message",
+          tone: "warning",
+          title: "Descuento no configurado",
+          body: "El administrador aún no configuró el descuento para trabajadores. Cobra a precio normal.",
+        });
+        return;
+      }
+
+      goTo({
+        name: "confirm",
+        worker,
+        policy: snapshot.policy,
+        usage: await localDiscountUsage(worker),
+      });
+    } finally {
+      searching.current = false;
+      setBusy(false);
+    }
   }
 
-  // ── Step 2: the worker types their PIN ───────────────────────────────────
-  async function checkPin(worker: CachedWorker, value: string) {
-    setBusy(true);
-    setPinError(null);
-
-    const online = navigator.onLine ? await verifyPinOnline(worker.dni, value) : null;
-
-    if (online && online.kind !== "unreachable") {
-      setBusy(false);
-      switch (online.kind) {
-        case "ok":
-          onApplied({
-            ...online.worker,
-            verification: "pin_online",
-            token: online.token,
-            usage: online.usage,
-            verifiedAt: Date.now(),
-          });
-          handleOpenChange(false);
-          return;
-        case "invalid_pin":
-          setPin("");
-          setPinError(
-            online.attemptsLeft > 0
-              ? `Clave incorrecta. Quedan ${online.attemptsLeft} ${online.attemptsLeft === 1 ? "intento" : "intentos"}.`
-              : "Clave incorrecta.",
-          );
-          return;
-        case "locked":
-          goTo({ name: "message", tone: "danger", title: "Demasiados intentos", body: `${online.message} La compra puede cobrarse sin descuento.` });
-          return;
-        case "not_active":
-          goTo({ name: "message", tone: "warning", title: "Sin descuento por ahora", body: online.message });
-          return;
-        case "not_found":
-          goTo({ name: "not_registered" });
-          return;
-      }
-    }
-
-    // No internet (or the server can't be reached): check against this
-    // tablet's copy. The sale is marked "verified offline" for the audit.
-    const offline = await verifyPinOffline(worker, value);
-    setBusy(false);
-    if (offline.ok) {
-      onApplied({
+  function apply(worker: CachedWorker, policy: CachedPolicy, usage: WorkerDiscountUsage) {
+    onApplied(
+      {
         id: worker.id,
         dni: worker.dni,
         fullName: worker.fullName,
         company: worker.company,
+        birthDate: worker.birthDate,
         pointsBalance: worker.pointsBalance,
-        verification: "pin_offline",
-        usage: await localDiscountUsage(worker),
-        verifiedAt: Date.now(),
-      });
-      handleOpenChange(false);
-      return;
-    }
-    if ("lockedMinutes" in offline) {
-      goTo({
-        name: "message",
-        tone: "danger",
-        title: "Demasiados intentos",
-        body: `Espera ${offline.lockedMinutes} minutos para volver a intentar. La compra puede cobrarse sin descuento.`,
-      });
-      return;
-    }
-    setPin("");
-    setPinError(
-      `Clave incorrecta. Quedan ${offline.attemptsLeft} ${offline.attemptsLeft === 1 ? "intento" : "intentos"}.`,
+        usage,
+      },
+      policy,
     );
+    handleOpenChange(false);
   }
 
   // ── Registration ─────────────────────────────────────────────────────────
   async function startRegistration() {
     goTo({ name: "register_form" });
     setFullName("");
+    setBirthDate(null);
     setNameLookup("loading");
 
     const result = await lookupDniOnline(dni);
@@ -324,7 +237,7 @@ export function WorkerDiscountDialog({
     }
   }
 
-  function continueToPin() {
+  async function submitRegistration() {
     if (fullName.trim().length < 3) {
       setFormError("Escribe el nombre completo del trabajador.");
       return;
@@ -333,13 +246,14 @@ export function WorkerDiscountDialog({
       setFormError("Escribe la empresa donde trabaja.");
       return;
     }
-    goTo({ name: "register_pin" });
-  }
+    const validBirthDate = birthDate && birthDateSchema.safeParse(birthDate).success;
+    if (!validBirthDate) {
+      setFormError("Revisa la fecha de nacimiento (día/mes/año, como en su DNI).");
+      return;
+    }
 
-  async function submitRegistration(value: string) {
     setBusy(true);
     try {
-      const pinHash = await hashPin(value);
       const result = await submitWorkerOp({
         id: crypto.randomUUID(),
         op: "register",
@@ -351,7 +265,7 @@ export function WorkerDiscountDialog({
           fullName: fullName.trim(),
           nameSource: nameLookup === "api" ? "api" : "manual",
           company: company.trim(),
-          pinHash,
+          birthDate,
           occurredAt: new Date().toISOString(),
         },
       });
@@ -367,7 +281,6 @@ export function WorkerDiscountDialog({
           " Hasta entonces, sus compras van sin descuento.",
       });
     } catch (error) {
-      goTo({ name: "register_form" });
       setFormError(
         error instanceof WorkerOpRejectedError
           ? error.message
@@ -378,70 +291,18 @@ export function WorkerDiscountDialog({
     }
   }
 
-  // ── Forgot PIN ───────────────────────────────────────────────────────────
-  async function submitPinReset(worker: CachedWorker, value: string) {
-    setBusy(true);
-    try {
-      const pinHash = await hashPin(value);
-      const result = await submitWorkerOp({
-        id: crypto.randomUUID(),
-        op: "pin_reset",
-        label: `Cambio de clave de ${worker.dni}`,
-        data: {
-          uuid: crypto.randomUUID(),
-          workerId: worker.id,
-          pinHash,
-          occurredAt: new Date().toISOString(),
-        },
-      });
-      await markWorkerPendingLocally(worker.id);
-      goTo({
-        name: "message",
-        tone: "success",
-        title: "Clave cambiada",
-        body:
-          (result === "queued"
-            ? "Se enviará cuando vuelva la conexión. "
-            : "") +
-          "Por seguridad, el descuento se reactivará cuando el administrador apruebe el cambio. Esta compra va sin descuento.",
-      });
-    } catch (error) {
-      goTo({ name: "pin", worker });
-      setPinError(
-        error instanceof WorkerOpRejectedError
-          ? error.message
-          : "No se pudo cambiar la clave. Intenta de nuevo.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function confirmPin(
-    first: string,
-    second: string,
-    onMatch: () => void,
-    backTo: Step,
-  ) {
-    if (first === second) {
-      onMatch();
-      return;
-    }
-    goTo(backTo);
-    setPinError("Las claves no coinciden. Vuelve a crearla.");
-  }
-
-  const position = stepPosition(step);
-  const title = position ? TITLES[position.flow] : step.name === "message" ? step.title : "";
+  const title =
+    step.name === "message"
+      ? step.title
+      : step.name === "register_form"
+        ? "Registrar trabajador del aeropuerto"
+        : "Descuento para trabajador del aeropuerto";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg">{title}</DialogTitle>
-          {position && (
-            <StepIndicator steps={FLOW_STEPS[position.flow]} current={position.index} />
-          )}
         </DialogHeader>
 
         {step.name === "dni" && (
@@ -449,12 +310,12 @@ export function WorkerDiscountDialog({
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              void searchDni();
+              void searchDni(dni);
             }}
           >
             <DialogDescription>
-              Pide al trabajador su DNI y escríbelo aquí. Los clientes normales
-              (pasajeros) no tienen este descuento.
+              Pide al trabajador su fotocheck y escribe su DNI. Los clientes
+              normales (pasajeros) no tienen este descuento.
             </DialogDescription>
             <div className="flex flex-col gap-2">
               <Label htmlFor="worker-dni">DNI del trabajador</Label>
@@ -466,9 +327,12 @@ export function WorkerDiscountDialog({
                 maxLength={8}
                 placeholder="8 números"
                 value={dni}
+                disabled={busy}
                 onChange={(event) => {
-                  setDni(event.target.value.replace(/\D/g, "").slice(0, 8));
+                  const value = event.target.value.replace(/\D/g, "").slice(0, 8);
+                  setDni(value);
                   setFormError(null);
+                  if (value.length === 8) void searchDni(value);
                 }}
                 className="h-14 text-center text-2xl tracking-[0.3em] tabular-nums"
               />
@@ -479,6 +343,19 @@ export function WorkerDiscountDialog({
               Buscar trabajador
             </Button>
           </form>
+        )}
+
+        {step.name === "confirm" && (
+          <ConfirmWorker
+            worker={step.worker}
+            policy={step.policy}
+            usage={step.usage}
+            onApply={() => apply(step.worker, step.policy, step.usage)}
+            onBack={() => {
+              setDni("");
+              goTo({ name: "dni" });
+            }}
+          />
         )}
 
         {step.name === "not_registered" && (
@@ -492,43 +369,16 @@ export function WorkerDiscountDialog({
               <UserPlusIcon />
               Registrar trabajador
             </Button>
-            <Button variant="ghost" onClick={() => goTo({ name: "dni" })}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDni("");
+                goTo({ name: "dni" });
+              }}
+            >
               <ArrowLeftIcon />
               Corregir DNI
             </Button>
-          </div>
-        )}
-
-        {step.name === "pin" && (
-          <div className="flex flex-col gap-4">
-            <WorkerCard worker={step.worker} />
-            <HandOverBanner>
-              Pide al trabajador que escriba <strong>su clave de 6 números</strong>.
-            </HandOverBanner>
-            <PinPad
-              value={pin}
-              onChange={(value) => {
-                setPin(value);
-                setPinError(null);
-              }}
-              onComplete={(value) => void checkPin(step.worker, value)}
-              disabled={busy}
-              error={pinError}
-              status={busy ? "Verificando clave…" : null}
-            />
-            <div className="flex items-center justify-between">
-              <Button variant="ghost" size="sm" onClick={() => goTo({ name: "dni" })}>
-                <ArrowLeftIcon />
-                Otro DNI
-              </Button>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={() => goTo({ name: "reset_intro", worker: step.worker })}
-              >
-                ¿Olvidó su clave?
-              </Button>
-            </div>
           </div>
         )}
 
@@ -537,7 +387,7 @@ export function WorkerDiscountDialog({
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              continueToPin();
+              void submitRegistration();
             }}
           >
             <div className="flex flex-col gap-2">
@@ -571,88 +421,41 @@ export function WorkerDiscountDialog({
               />
             </div>
 
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="worker-birth-date">Fecha de nacimiento</Label>
+              <BirthDateInput
+                id="worker-birth-date"
+                onChange={setBirthDate}
+                className="tabular-nums tracking-wider"
+              />
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CakeIcon className="size-3.5" aria-hidden />
+                Cópiala de su DNI. El día de su cumpleaños recibe un regalo.
+              </p>
+            </div>
+
             {formError && (
-              <Notice tone="danger" icon={AlertTriangleIcon} title="No se pudo continuar">
+              <Notice tone="danger" icon={AlertTriangleIcon} title="No se pudo registrar">
                 {formError}
               </Notice>
             )}
 
-            <Button type="submit" className="h-12 text-base" disabled={nameLookup === "loading"}>
-              Siguiente: el trabajador crea su clave
+            <Button type="submit" className="h-12 text-base" disabled={busy || nameLookup === "loading"}>
+              {busy ? <Loader2Icon className="animate-spin" /> : <UserPlusIcon />}
+              Registrar trabajador
             </Button>
-            <Button type="button" variant="ghost" onClick={() => goTo({ name: "dni" })}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setDni("");
+                goTo({ name: "dni" });
+              }}
+            >
               <ArrowLeftIcon />
               Cancelar
             </Button>
           </form>
-        )}
-
-        {(step.name === "register_pin" || step.name === "reset_pin") && (
-          <div className="flex flex-col gap-4">
-            <HandOverBanner>
-              El trabajador crea <strong>su clave de 6 números</strong>. La usará en
-              cada compra; no debe compartirla con nadie.
-            </HandOverBanner>
-            <PinPad
-              value={pin}
-              onChange={(value) => {
-                setPin(value);
-                setPinError(null);
-              }}
-              onComplete={(value) =>
-                goTo(
-                  step.name === "register_pin"
-                    ? { name: "register_confirm", firstPin: value }
-                    : { name: "reset_confirm", worker: step.worker, firstPin: value },
-                )
-              }
-              error={pinError}
-            />
-          </div>
-        )}
-
-        {(step.name === "register_confirm" || step.name === "reset_confirm") && (
-          <div className="flex flex-col gap-4">
-            <HandOverBanner>
-              Escribe <strong>la misma clave otra vez</strong> para confirmarla.
-            </HandOverBanner>
-            <PinPad
-              value={pin}
-              onChange={setPin}
-              disabled={busy}
-              status={busy ? "Guardando…" : null}
-              onComplete={(value) =>
-                step.name === "register_confirm"
-                  ? confirmPin(step.firstPin, value, () => void submitRegistration(value), {
-                      name: "register_pin",
-                    })
-                  : confirmPin(
-                      step.firstPin,
-                      value,
-                      () => void submitPinReset(step.worker, value),
-                      { name: "reset_pin", worker: step.worker },
-                    )
-              }
-            />
-          </div>
-        )}
-
-        {step.name === "reset_intro" && (
-          <div className="flex flex-col gap-4">
-            <WorkerCard worker={step.worker} />
-            <Notice tone="warning" icon={AlertTriangleIcon} title="Antes de continuar">
-              El trabajador creará una clave nueva. Por seguridad, su descuento
-              quedará en pausa hasta que el administrador apruebe el cambio. Esta
-              compra va sin descuento.
-            </Notice>
-            <Button className="h-12 text-base" onClick={() => goTo({ name: "reset_pin", worker: step.worker })}>
-              Continuar: crear clave nueva
-            </Button>
-            <Button variant="ghost" onClick={() => goTo({ name: "pin", worker: step.worker })}>
-              <ArrowLeftIcon />
-              Volver
-            </Button>
-          </div>
         )}
 
         {step.name === "message" && (
@@ -664,7 +467,7 @@ export function WorkerDiscountDialog({
             >
               {step.body}
             </Notice>
-            <Button className="h-12 text-base" onClick={() => handleOpenChange(false)}>
+            <Button className="h-12 text-base" autoFocus onClick={() => handleOpenChange(false)}>
               Entendido
             </Button>
           </div>
@@ -674,58 +477,75 @@ export function WorkerDiscountDialog({
   );
 }
 
-function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
-  return (
-    <ol className="flex items-center gap-2 text-xs" aria-label="Pasos">
-      {steps.map((label, i) => (
-        <li key={label} className="flex items-center gap-2">
-          <span
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium",
-              i === current
-                ? "bg-primary text-primary-foreground"
-                : i < current
-                  ? "bg-primary/10 text-primary"
-                  : "bg-muted text-muted-foreground",
-            )}
-            aria-current={i === current ? "step" : undefined}
-          >
-            <span className="tabular-nums">{i + 1}</span>
-            {label}
-          </span>
-          {i < steps.length - 1 && <span aria-hidden className="h-px w-3 bg-border" />}
-        </li>
-      ))}
-    </ol>
-  );
-}
+// The cashier compares the name with the worker's fotocheck and applies the
+// discount with one tap (or Enter).
+function ConfirmWorker({
+  worker,
+  policy,
+  usage,
+  onApply,
+  onBack,
+}: {
+  worker: CachedWorker;
+  policy: CachedPolicy;
+  usage: WorkerDiscountUsage;
+  onApply: () => void;
+  onBack: () => void;
+}) {
+  const purchasesLeft = Math.max(0, policy.maxDiscountedSalesPerDay - usage.discountedSalesToday);
+  const birthday = birthdayGiftAvailable({
+    birthDate: worker.birthDate,
+    giftUsedThisYear: usage.giftUsedThisYear,
+    giftMaxAmount: policy.birthdayGiftMaxAmount,
+    at: new Date(),
+  });
 
-function WorkerCard({ worker }: { worker: CachedWorker }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <BadgeCheckIcon className="size-5" aria-hidden />
-      </span>
-      <div className="min-w-0 leading-tight">
-        <p className="truncate font-semibold">{worker.fullName}</p>
-        <p className="truncate text-sm text-muted-foreground">
-          {worker.company} · DNI {worker.dni}
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <BadgeCheckIcon className="size-5" aria-hidden />
+        </span>
+        <div className="min-w-0 leading-tight">
+          <p className="truncate font-semibold">{worker.fullName}</p>
+          <p className="truncate text-sm text-muted-foreground">
+            {worker.company} · DNI {worker.dni}
+          </p>
+        </div>
+      </div>
+      <p className="flex items-start gap-2 text-sm text-muted-foreground">
+        <IdCardIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+        Verifica que el nombre coincida con su fotocheck.
+      </p>
+
+      {birthday && (
+        <Notice tone="success" icon={CakeIcon} title="¡Hoy es su cumpleaños!">
+          Puede llevar 1 producto gratis de hasta {formatSoles(policy.birthdayGiftMaxAmount)}.
+          Márcalo con 🎂 en la cesta.
+        </Notice>
+      )}
+      {purchasesLeft === 0 ? (
+        <Notice tone="warning" icon={AlertTriangleIcon} title="Ya usó sus descuentos de hoy">
+          Sus {policy.maxDiscountedSalesPerDay} compras con descuento del día ya se usaron.
+          Esta compra va a precio normal, pero suma puntos.
+        </Notice>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Descuento en las primeras {policy.maxDiscountedUnitsPerSale} unidades ·{" "}
+          {purchasesLeft === 1
+            ? "última compra con descuento de hoy"
+            : `le quedan ${purchasesLeft} compras con descuento hoy`}
         </p>
-      </div>
-    </div>
-  );
-}
+      )}
 
-// The key moment of the anti-fraud flow: the cashier hands the screen over,
-// so only the worker sees and types the PIN.
-function HandOverBanner({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-brand-blue/30 bg-brand-blue/10 p-3 text-sm">
-      <MonitorSmartphoneIcon className="mt-0.5 size-5 shrink-0 text-brand-blue" aria-hidden />
-      <div className="space-y-0.5">
-        <p className="font-semibold">Gira la pantalla hacia el trabajador</p>
-        <p className="text-muted-foreground">{children}</p>
-      </div>
+      <Button className="h-12 text-base" autoFocus onClick={onApply}>
+        <CheckCircle2Icon />
+        Aplicar al trabajador
+      </Button>
+      <Button variant="ghost" onClick={onBack}>
+        <ArrowLeftIcon />
+        Otro DNI
+      </Button>
     </div>
   );
 }

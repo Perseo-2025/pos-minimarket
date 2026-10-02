@@ -1,9 +1,10 @@
 import type { AuditEventType } from "@/domain/entities/audit";
-import { type WorkerStatus, withoutPin } from "@/domain/entities/worker";
+import type { WorkerStatus } from "@/domain/entities/worker";
 import { ValidationError, WorkerNotFoundError } from "@/domain/errors";
 import type { AuditRepository } from "@/domain/repositories/audit-repository";
 import type { IdentityLookup } from "@/domain/repositories/identity-lookup";
 import type { WorkerRepository } from "@/domain/repositories/worker-repository";
+import { workerBirthDateSchema } from "@/application/validation/worker";
 import { withTimeout } from "./lookup-dni";
 
 export type WorkerAction = "approve" | "reject" | "suspend" | "reactivate";
@@ -33,7 +34,7 @@ export async function listWorkersUseCase(
 export async function getWorkerDetailUseCase(repo: WorkerRepository, id: number) {
   const worker = await repo.findById(id);
   if (!worker) throw new WorkerNotFoundError();
-  return { worker: withoutPin(worker), purchases: await repo.purchaseHistory(id, 30) };
+  return { worker, purchases: await repo.purchaseHistory(id, 30) };
 }
 
 export async function setWorkerStatusUseCase(
@@ -95,4 +96,26 @@ export async function refreshWorkerNameUseCase(
   });
 
   return { fullName, changed: fullName !== worker.fullName };
+}
+
+// Admin fills in or corrects the birth date (workers registered before it
+// was asked have none, so they get no birthday gift until then).
+export async function updateWorkerBirthDateUseCase(
+  deps: { workers: WorkerRepository; audit: AuditRepository },
+  input: unknown,
+  actorId: number,
+) {
+  const data = workerBirthDateSchema.parse(input);
+  const worker = await deps.workers.findById(data.workerId);
+  if (!worker) throw new WorkerNotFoundError();
+  if (worker.birthDate === data.birthDate) return;
+
+  await deps.workers.updateBirthDate(worker.id, data.birthDate);
+  await deps.audit.record({
+    type: "worker_birth_date_updated",
+    actorId,
+    workerId: worker.id,
+    payload: { from: worker.birthDate, to: data.birthDate },
+    occurredAt: new Date(),
+  });
 }

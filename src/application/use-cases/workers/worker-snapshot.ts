@@ -1,17 +1,17 @@
 import type { DiscountPolicyRepository } from "@/domain/repositories/discount-policy-repository";
 import type { WorkerRepository } from "@/domain/repositories/worker-repository";
-import { storeDayStart, storeMonthStart } from "@/domain/value-objects/store-time";
+import { storeDayStart, storeYearStart } from "@/domain/value-objects/store-time";
 
 // Everything the POS needs to identify workers and price their discount
-// without internet: workers (hashes for active ones only), their usage of
-// the caps, and the active policy.
+// without internet: workers (with their birth dates for the gift), their
+// usage of the limits, and the active policy.
 export async function getWorkerSnapshotUseCase(deps: {
   workers: WorkerRepository;
   policies: DiscountPolicyRepository;
 }) {
   const now = new Date();
   const [workers, policy] = await Promise.all([
-    deps.workers.offlineSnapshot(storeDayStart(now), storeMonthStart(now)),
+    deps.workers.offlineSnapshot(storeDayStart(now), storeYearStart(now)),
     deps.policies.getActive(),
   ]);
 
@@ -19,10 +19,10 @@ export async function getWorkerSnapshotUseCase(deps: {
     generatedAt: now.toISOString(),
     policy: policy && {
       id: policy.id,
-      discountPercent: policy.discountPercent,
+      maxDiscountedUnitsPerSale: policy.maxDiscountedUnitsPerSale,
       maxDiscountedSalesPerDay: policy.maxDiscountedSalesPerDay,
-      maxDiscountPerMonth: policy.maxDiscountPerMonth,
       pointsPerSol: policy.pointsPerSol,
+      birthdayGiftMaxAmount: policy.birthdayGiftMaxAmount,
     },
     workers,
   };

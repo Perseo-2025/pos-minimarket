@@ -1,3 +1,4 @@
+import { DrizzleAttendanceRepository } from "./drizzle-attendance-repository";
 import { DrizzleAuditRepository } from "./drizzle-audit-repository";
 import { DrizzleCashShiftRepository } from "./drizzle-cash-shift-repository";
 import { DrizzleCategoryRepository } from "./drizzle-category-repository";
@@ -12,7 +13,9 @@ import { DrizzleSaleRepository } from "./drizzle-sale-repository";
 import { DrizzleSupplierRepository } from "./drizzle-supplier-repository";
 import { DrizzleUserRepository } from "./drizzle-user-repository";
 import { DrizzleWorkerRepository } from "./drizzle-worker-repository";
+import { DrizzleWorkScheduleRepository } from "./drizzle-work-schedule-repository";
 
+export const attendanceRepository = new DrizzleAttendanceRepository();
 export const auditRepository = new DrizzleAuditRepository();
 export const cashShiftRepository = new DrizzleCashShiftRepository();
 export const categoryRepository = new DrizzleCategoryRepository();
@@ -27,3 +30,4 @@ export const saleRepository = new DrizzleSaleRepository();
 export const supplierRepository = new DrizzleSupplierRepository();
 export const userRepository = new DrizzleUserRepository();
 export const workerRepository = new DrizzleWorkerRepository();
+export const workScheduleRepository = new DrizzleWorkScheduleRepository();

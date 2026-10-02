@@ -28,8 +28,9 @@ export function productMargin(
 export function profitWithWorkerDiscount(
   priceSale: number,
   priceCost: number | null,
-  workerDiscountPercent: number,
+  // Soles off each unit.
+  workerDiscountAmount: number,
 ): number | null {
   if (priceCost === null || priceCost <= 0) return null;
-  return round2(priceSale * (1 - workerDiscountPercent / 100) - priceCost);
+  return round2(priceSale - workerDiscountAmount - priceCost);
 }

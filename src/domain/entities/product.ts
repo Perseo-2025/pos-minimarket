@@ -13,8 +13,8 @@ export interface Product {
   categoryName: string;
   categoryIcon: CategoryIcon | null;
   priceSale: number;
-  // % an identified airport worker gets off this product (0–99).
-  workerDiscountPercent: number;
+  // Soles an identified airport worker gets off each unit (below the price).
+  workerDiscountAmount: number;
   priceCost: number | null;
   stockQuantity: number | null;
   trackStock: boolean;
@@ -31,5 +31,5 @@ export interface Product {
 // worker discount allowed on the product.
 export interface ProductCatalogEntry {
   price: number;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
 }

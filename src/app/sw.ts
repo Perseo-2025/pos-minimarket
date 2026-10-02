@@ -20,8 +20,7 @@ const serwist = new Serwist({
     {
       matcher: ({ url }) =>
         url.pathname.startsWith("/api/sync") ||
-        url.pathname.startsWith("/api/workers") ||
-        url.pathname.startsWith("/api/courtesy"),
+        url.pathname.startsWith("/api/workers"),
       handler: new NetworkOnly(),
     },
     {

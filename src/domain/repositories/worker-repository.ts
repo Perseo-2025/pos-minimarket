@@ -4,7 +4,6 @@ import type {
   WorkerNameSource,
   WorkerPurchase,
   WorkerStatus,
-  WorkerWithPin,
 } from "../entities/worker";
 
 export interface CreateWorkerData {
@@ -14,40 +13,38 @@ export interface CreateWorkerData {
   fullName: string;
   nameSource: WorkerNameSource;
   company: string;
-  pinHash: string;
+  birthDate: string;
   registeredById: number;
 }
 
 // What the POS keeps in IndexedDB to identify workers without internet.
-// PIN hashes are only included for active workers.
 export interface OfflineWorker {
   id: number;
   dni: string;
   fullName: string;
   company: string;
+  birthDate: string | null;
   status: WorkerStatus;
-  pinHash: string | null;
   pointsBalance: number;
   usage: WorkerDiscountUsage;
 }
 
 export interface WorkerRepository {
-  findById(id: number): Promise<WorkerWithPin | null>;
-  findByDni(dni: string): Promise<WorkerWithPin | null>;
+  findById(id: number): Promise<Worker | null>;
+  findByDni(dni: string): Promise<Worker | null>;
   findAll(status?: WorkerStatus): Promise<Worker[]>;
   countByStatus(): Promise<Record<WorkerStatus, number>>;
   // Returns the new worker's id, or null when a worker with this uuid
   // already exists (retry).
   create(data: CreateWorkerData): Promise<number | null>;
-  // A new PIN always sends the worker back to "pending" (pin_reset).
-  replacePin(id: number, pinHash: string): Promise<void>;
   setStatus(id: number, status: WorkerStatus, actorId: number): Promise<void>;
   updateName(id: number, fullName: string, nameSource: WorkerNameSource): Promise<void>;
+  updateBirthDate(id: number, birthDate: string): Promise<void>;
   discountUsage(
     workerId: number,
     dayStart: Date,
-    monthStart: Date,
+    yearStart: Date,
   ): Promise<WorkerDiscountUsage>;
-  offlineSnapshot(dayStart: Date, monthStart: Date): Promise<OfflineWorker[]>;
+  offlineSnapshot(dayStart: Date, yearStart: Date): Promise<OfflineWorker[]>;
   purchaseHistory(workerId: number, limit: number): Promise<WorkerPurchase[]>;
 }

@@ -186,6 +186,15 @@ export class DrizzleCashShiftRepository implements CashShiftRepository {
     return row ?? null;
   }
 
+  async hasOpenShift(cashierId: number) {
+    const [row] = await db
+      .select({ id: cashShifts.id })
+      .from(cashShifts)
+      .where(and(eq(cashShifts.cashierId, cashierId), eq(cashShifts.status, "open")))
+      .limit(1);
+    return Boolean(row);
+  }
+
   async list(from: Date, to: Date) {
     const rows = await selectShifts()
       .where(and(gte(cashShifts.openedAt, from), lte(cashShifts.openedAt, to)))

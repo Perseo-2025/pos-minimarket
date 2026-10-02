@@ -1,7 +1,7 @@
 import { ZodError } from "zod";
 import {
-  InvalidPinError,
-  PinLockedError,
+  InvalidWorkerCredentialsError,
+  TooManyAttemptsError,
   UnauthorizedError,
   ValidationError,
   WorkerAlreadyExistsError,
@@ -18,8 +18,8 @@ const USER_FACING_ERRORS = [
   WorkerNotFoundError,
   WorkerNotActiveError,
   WorkerAlreadyExistsError,
-  InvalidPinError,
-  PinLockedError,
+  InvalidWorkerCredentialsError,
+  TooManyAttemptsError,
 ];
 
 function toFailure(error: unknown): { ok: false; error: string } {

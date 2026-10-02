@@ -1,15 +1,16 @@
 import { DNI_LOOKUP_TIMEOUT_MS, identityLookup } from "./identity";
+import type { AttendanceDeps } from "@/application/use-cases/attendance/deps";
 import {
+  attendanceRepository,
   auditRepository,
+  cashShiftRepository,
   discountPolicyRepository,
   productRepository,
   saleRepository,
   userRepository,
   workerRepository,
+  workScheduleRepository,
 } from "./repositories";
-import { pinHasher } from "./security/pin-hash";
-import { issueCourtesyToken, verifyCourtesyToken } from "./security/courtesy-token";
-import { issueWorkerToken, verifyWorkerToken } from "./security/worker-token";
 
 // Composition root for the use cases that need several adapters.
 export const saleDeps = {
@@ -18,23 +19,20 @@ export const saleDeps = {
   products: productRepository,
   workers: workerRepository,
   policies: discountPolicyRepository,
-  verifyWorkerToken,
-  verifyCourtesyToken,
-};
-
-export const courtesyDeps = {
-  users: userRepository,
-  audit: auditRepository,
-  issueCourtesyToken,
 };
 
 export const workerDeps = {
   workers: workerRepository,
   audit: auditRepository,
   identity: identityLookup,
-  pinHasher,
   policies: discountPolicyRepository,
-  issueToken: issueWorkerToken,
+};
+
+export const attendanceDeps: AttendanceDeps = {
+  attendance: attendanceRepository,
+  schedules: workScheduleRepository,
+  audit: auditRepository,
+  shifts: cashShiftRepository,
 };
 
 export { DNI_LOOKUP_TIMEOUT_MS };

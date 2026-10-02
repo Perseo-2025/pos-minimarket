@@ -2,7 +2,7 @@
 
 import {
   BadgePercentIcon,
-  GiftIcon,
+  CakeIcon,
   MinusIcon,
   PlusIcon,
   ShoppingBasketIcon,
@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { PaymentType } from "@/domain/entities/sale";
-import type { SalePricing } from "@/domain/services/sale-pricing";
+import type { LinePricing, SalePricing } from "@/domain/services/sale-pricing";
 import { formatSoles } from "@/lib/money";
 import type { CartItem } from "@/types";
 import { PaymentMethodPicker } from "./payment-method-picker";
@@ -32,16 +32,15 @@ export function CartPanel({
   onDecrease,
   onRemove,
   onCheckout,
-  onToggleCourtesy,
-  courtesy,
-  onRequestCourtesyApproval,
+  gift,
+  onToggleGift,
   showTitle = true,
 }: {
   items: CartItem[];
   pricing: SalePricing;
   // Airport worker attached to this sale (staff discount), if any.
   worker: AppliedWorker | null;
-  // Why the worker's discount doesn't apply in full (daily/monthly cap).
+  // Why the worker's discount doesn't apply in full (daily cap, units).
   workerNotice: string | null;
   onAddWorker: () => void;
   onRemoveWorker: () => void;
@@ -51,14 +50,15 @@ export function CartPanel({
   onDecrease: (productId: number) => void;
   onRemove: (productId: number) => void;
   onCheckout: () => void;
-  onToggleCourtesy: (productId: number) => void;
-  // Admin approval state of the courtesy lines in this cart.
-  courtesy: { approvedBy: string | null; needsApproval: boolean };
-  onRequestCourtesyApproval: () => void;
+  // Set on the worker's birthday while this year's gift is unused: products
+  // up to maxAmount can be marked as the gift.
+  gift: { maxAmount: number } | null;
+  onToggleGift: (productId: number) => void;
   // The mobile Sheet already renders its own title.
   showTitle?: boolean;
 }) {
   const units = items.reduce((sum, item) => sum + item.quantity, 0);
+  const giftChosen = pricing.giftTotal > 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -91,29 +91,7 @@ export function CartPanel({
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{item.name}</p>
-                {line?.isCourtesy ? (
-                  <p className="text-xs tabular-nums">
-                    <s className="text-muted-foreground">
-                      {formatSoles(line.gross)}
-                    </s>{" "}
-                    <span className="font-semibold text-brand-orange">
-                      Cortesía
-                    </span>
-                  </p>
-                ) : line && line.discountAmount > 0 ? (
-                  <p className="text-xs tabular-nums">
-                    <span className="text-muted-foreground">
-                      {formatSoles(item.unitPrice)} c/u ·{" "}
-                    </span>
-                    <span className="font-medium text-emerald-700 dark:text-emerald-400">
-                      −{line.discountPercent}% → {formatSoles(line.net)}
-                    </span>
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground tabular-nums">
-                    {formatSoles(item.unitPrice)} c/u
-                  </p>
-                )}
+                <LinePrice item={item} line={line} />
               </div>
               <div className="flex items-center gap-1">
                 <Button
@@ -135,27 +113,27 @@ export function CartPanel({
                 >
                   <PlusIcon />
                 </Button>
-                <Button
-                  size="icon-sm"
-                  variant={item.isCourtesy ? "default" : "ghost"}
-                  className={
-                    item.isCourtesy
-                      ? "bg-brand-orange text-white hover:bg-brand-orange/90"
-                      : "text-brand-orange hover:bg-brand-orange/10 hover:text-brand-orange"
-                  }
-                  aria-label={
-                    item.isCourtesy
-                      ? `Quitar cortesía de ${item.name}`
-                      : `Regalar ${item.name} (cortesía)`
-                  }
-                  aria-pressed={item.isCourtesy}
-                  title={
-                    item.isCourtesy ? "Quitar cortesía" : "Cortesía (regalar)"
-                  }
-                  onClick={() => onToggleCourtesy(item.productId)}
-                >
-                  <GiftIcon />
-                </Button>
+                {(item.isGift || (gift && !giftChosen && item.unitPrice <= gift.maxAmount)) && (
+                  <Button
+                    size="icon-sm"
+                    variant={item.isGift ? "default" : "ghost"}
+                    className={
+                      item.isGift
+                        ? "bg-brand-orange text-white hover:bg-brand-orange/90"
+                        : "text-brand-orange hover:bg-brand-orange/10 hover:text-brand-orange"
+                    }
+                    aria-label={
+                      item.isGift
+                        ? `Quitar regalo de cumpleaños de ${item.name}`
+                        : `Regalar ${item.name} por su cumpleaños`
+                    }
+                    aria-pressed={item.isGift}
+                    title={item.isGift ? "Quitar regalo" : "Regalo de cumpleaños"}
+                    onClick={() => onToggleGift(item.productId)}
+                  >
+                    <CakeIcon />
+                  </Button>
+                )}
                 <Button
                   size="icon-sm"
                   variant="ghost"
@@ -197,6 +175,12 @@ export function CartPanel({
                 <XIcon />
               </Button>
             </div>
+            {gift && !giftChosen && (
+              <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-brand-orange/15 px-2 py-1.5 text-xs text-brand-orange">
+                <CakeIcon className="size-3.5 shrink-0" aria-hidden />
+                ¡Cumpleaños! Toca 🎂 en un producto de hasta {formatSoles(gift.maxAmount)} para regalárselo.
+              </p>
+            )}
             {workerNotice && (
               <p className="mt-2 rounded-lg bg-amber-500/15 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">
                 {workerNotice}
@@ -213,7 +197,7 @@ export function CartPanel({
             <span className="flex flex-col items-start leading-tight">
               <span className="font-medium">Descuento Trabajador</span>
               <span className="text-xs text-muted-foreground">
-                Aplicar descuento con DNI y clave
+                Escribe su DNI (fotocheck)
               </span>
             </span>
           </Button>
@@ -229,34 +213,8 @@ export function CartPanel({
           />
         </div>
 
-        {pricing.courtesyTotal > 0 &&
-          (courtesy.needsApproval ? (
-            <div className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-              <GiftIcon
-                className="size-5 shrink-0 text-amber-600"
-                aria-hidden
-              />
-              <span className="flex-1 leading-tight text-amber-800 dark:text-amber-300">
-                Falta que un administrador apruebe la cortesía.
-              </span>
-              <Button size="sm" onClick={onRequestCourtesyApproval}>
-                Aprobar
-              </Button>
-            </div>
-          ) : (
-            <p className="flex items-center gap-2 rounded-xl border border-brand-orange/30 bg-brand-orange/10 p-3 text-sm">
-              <GiftIcon
-                className="size-5 shrink-0 text-brand-orange"
-                aria-hidden
-              />
-              <span>
-                Cortesía aprobada por <strong>{courtesy.approvedBy}</strong>
-              </span>
-            </p>
-          ))}
-
         <div className="space-y-1">
-          {(pricing.discountTotal > 0 || pricing.courtesyTotal > 0) && (
+          {(pricing.discountTotal > 0 || pricing.giftTotal > 0) && (
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Subtotal</span>
               <span className="tabular-nums">
@@ -266,21 +224,17 @@ export function CartPanel({
           )}
           {pricing.discountTotal > 0 && (
             <div className="flex justify-between text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              <span>
-                Descuento trabajador
-                {pricing.discountPercent > 0 &&
-                  ` (${pricing.discountPercent}%)`}
-              </span>
+              <span>Descuento trabajador</span>
               <span className="tabular-nums">
                 −{formatSoles(pricing.discountTotal)}
               </span>
             </div>
           )}
-          {pricing.courtesyTotal > 0 && (
+          {pricing.giftTotal > 0 && (
             <div className="flex justify-between text-sm font-medium text-brand-orange">
-              <span>Cortesía</span>
+              <span>Regalo de cumpleaños</span>
               <span className="tabular-nums">
-                −{formatSoles(pricing.courtesyTotal)}
+                −{formatSoles(pricing.giftTotal)}
               </span>
             </div>
           )}
@@ -305,12 +259,52 @@ export function CartPanel({
 
         <Button
           className="h-14 w-full text-lg font-semibold"
-          disabled={items.length === 0 || courtesy.needsApproval}
+          disabled={items.length === 0}
           onClick={onCheckout}
         >
           Cobrar
         </Button>
       </div>
     </div>
+  );
+}
+
+// What the line costs, spelled out: "S/ 5.00 → S/ 4.00 c/u" when every unit
+// has the discount, or "3 × S/ 4.00 + 2 × S/ 5.00" past the per-purchase
+// limit. The gift unit shows apart.
+function LinePrice({ item, line }: { item: CartItem; line: LinePricing | undefined }) {
+  if (!line) return null;
+  const paid = item.quantity - (line.isGift ? 1 : 0);
+  const discounted = line.discountedQuantity;
+  const discountedPrice = item.unitPrice - line.discountUnitAmount;
+
+  return (
+    <p className="text-xs tabular-nums">
+      {line.isGift && (
+        <span className="font-semibold text-brand-orange">
+          🎂 1 de regalo{paid > 0 ? " · " : ""}
+        </span>
+      )}
+      {discounted > 0 && discounted === paid ? (
+        <>
+          <s className="text-muted-foreground">{formatSoles(item.unitPrice)}</s>{" "}
+          <span className="font-medium text-emerald-700 dark:text-emerald-400">
+            → {formatSoles(discountedPrice)} c/u
+          </span>
+        </>
+      ) : discounted > 0 ? (
+        <>
+          <span className="font-medium text-emerald-700 dark:text-emerald-400">
+            {discounted} × {formatSoles(discountedPrice)}
+          </span>
+          <span className="text-muted-foreground">
+            {" "}
+            + {paid - discounted} × {formatSoles(item.unitPrice)}
+          </span>
+        </>
+      ) : paid > 0 ? (
+        <span className="text-muted-foreground">{formatSoles(item.unitPrice)} c/u</span>
+      ) : null}
+    </p>
   );
 }

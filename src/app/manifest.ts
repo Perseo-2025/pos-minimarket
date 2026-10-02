@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "POS Minimarket",
-    short_name: "POS Tienda",
-    description: "Punto de venta para minimarket, con soporte offline",
+    name: "NAVEXPRESS",
+    short_name: "NAVEXPRESS",
+    description: "NAVEXPRESS: punto de venta para minimarket, con soporte offline",
     start_url: "/",
     display: "standalone",
     background_color: "#ffffff",

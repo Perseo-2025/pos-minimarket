@@ -28,19 +28,20 @@ import {
 } from "@/domain/entities/worker";
 import { usePagination } from "@/hooks/use-pagination";
 import { formatSoles } from "@/lib/money";
-import { DataTable, ID_COLUMN, IdCell } from "../data-table";
+import { DataTable, ORDER_COLUMN, OrderCell } from "../data-table";
 import { DataTablePagination } from "../data-table-pagination";
 
 export type SaleRow = {
-  // id_sale: also the ticket number.
+  // id_sale: the order number.
   id: number;
   createdAt: string;
   cashierName: string;
   paymentType: PaymentType;
   subtotal: number;
   discountTotal: number;
-  discountPercent: number;
-  courtesyTotal: number;
+  // Free lines: the birthday gift, or on older sales an admin-approved
+  // courtesy (then courtesyApprovedByName is set).
+  giftTotal: number;
   courtesyApprovedByName: string | null;
   total: number;
   workerName: string | null;
@@ -55,15 +56,15 @@ export type SaleRow = {
     unitPrice: number;
     quantity: number;
     lineTotal: number;
-    discountPercent: number;
+    discountUnitAmount: number;
     discountAmount: number;
-    isCourtesy: boolean;
+    isGift: boolean;
     captureSource: CaptureSource | null;
   }[];
 };
 
 const COLUMNS = [
-  ID_COLUMN,
+  ORDER_COLUMN,
   { label: "Hora" },
   { label: "Cajero" },
   { label: "Productos", className: "text-right" },
@@ -71,6 +72,11 @@ const COLUMNS = [
   { label: "Trabajador" },
   { label: "Total", className: "text-right" },
 ];
+
+const giftLabel = (sale: SaleRow) =>
+  sale.courtesyApprovedByName
+    ? `Cortesía · aprobó ${sale.courtesyApprovedByName}`
+    : "Regalo de cumpleaños 🎂";
 
 const alertFlags = (sale: SaleRow) =>
   sale.auditFlags.filter((flag) => !INFO_AUDIT_FLAGS.includes(flag));
@@ -107,7 +113,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
           <TableRow
             key={sale.id}
             tabIndex={0}
-            aria-label={`Ver detalle del ticket ${sale.id}`}
+            aria-label={`Ver detalle de la orden ${sale.id}`}
             className="cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
             onClick={() => setSelected(sale)}
             onKeyDown={(event) => {
@@ -117,7 +123,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
               }
             }}
           >
-            <IdCell id={sale.id} />
+            <OrderCell id={sale.id} />
             <TableCell className="text-muted-foreground tabular-nums">
               {timeFormat.format(new Date(sale.createdAt))}
             </TableCell>
@@ -141,9 +147,10 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
               ) : (
                 <span className="text-muted-foreground">—</span>
               )}
-              {sale.courtesyTotal > 0 && (
+              {sale.giftTotal > 0 && (
                 <div className="text-xs font-medium text-brand-orange tabular-nums">
-                  Cortesía −{formatSoles(sale.courtesyTotal)}
+                  {sale.courtesyApprovedByName ? "Cortesía" : "Regalo 🎂"} −
+                  {formatSoles(sale.giftTotal)}
                 </div>
               )}
               {alertFlags(sale).length > 0 && (
@@ -169,7 +176,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>Ticket #{selected.id}</SheetTitle>
+                <SheetTitle>Orden #{selected.id}</SheetTitle>
                 <SheetDescription>
                   {dateTimeFormat.format(new Date(selected.createdAt))}
                 </SheetDescription>
@@ -237,27 +244,28 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
                           {item.captureSource &&
                             ` · ${CAPTURE_SOURCE_LABELS[item.captureSource]}`}
                         </p>
-                        {item.isCourtesy ? (
+                        {item.isGift ? (
                           <p className="text-xs font-medium text-brand-orange">
-                            Cortesía (regalado)
+                            {giftLabel(selected)}
                           </p>
                         ) : (
                           item.discountAmount > 0 && (
                             <p className="text-xs text-emerald-700 tabular-nums dark:text-emerald-400">
-                              −{item.discountPercent}% trabajador · −
-                              {formatSoles(item.discountAmount)}
+                              Trabajador −{formatSoles(item.discountAmount)}
+                              {item.discountUnitAmount > 0 &&
+                                ` (${Math.round(item.discountAmount / item.discountUnitAmount)} × −${formatSoles(item.discountUnitAmount)})`}
                             </p>
                           )
                         )}
                       </div>
                       <span className="text-right font-medium tabular-nums">
-                        {item.isCourtesy || item.discountAmount > 0 ? (
+                        {item.isGift || item.discountAmount > 0 ? (
                           <>
                             <s className="block text-xs font-normal text-muted-foreground">
                               {formatSoles(item.lineTotal)}
                             </s>
                             {formatSoles(
-                              item.isCourtesy ? 0 : item.lineTotal - item.discountAmount,
+                              item.isGift ? 0 : item.lineTotal - item.discountAmount,
                             )}
                           </>
                         ) : (
@@ -271,7 +279,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
 
               <div className="mt-auto px-4 pb-4">
                 <Separator className="mb-4" />
-                {(selected.discountTotal > 0 || selected.courtesyTotal > 0) && (
+                {(selected.discountTotal > 0 || selected.giftTotal > 0) && (
                   <div className="mb-2 space-y-1 text-sm">
                     <div className="flex justify-between text-muted-foreground">
                       <span>Subtotal</span>
@@ -279,24 +287,17 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
                     </div>
                     {selected.discountTotal > 0 && (
                       <div className="flex justify-between text-emerald-700 dark:text-emerald-400">
-                        <span>
-                          Descuento trabajador
-                          {selected.discountPercent > 0 && ` (${selected.discountPercent}%)`}
-                        </span>
+                        <span>Descuento trabajador</span>
                         <span className="tabular-nums">
                           −{formatSoles(selected.discountTotal)}
                         </span>
                       </div>
                     )}
-                    {selected.courtesyTotal > 0 && (
+                    {selected.giftTotal > 0 && (
                       <div className="flex justify-between text-brand-orange">
-                        <span>
-                          Cortesía
-                          {selected.courtesyApprovedByName &&
-                            ` · aprobó ${selected.courtesyApprovedByName}`}
-                        </span>
+                        <span>{giftLabel(selected)}</span>
                         <span className="tabular-nums">
-                          −{formatSoles(selected.courtesyTotal)}
+                          −{formatSoles(selected.giftTotal)}
                         </span>
                       </div>
                     )}

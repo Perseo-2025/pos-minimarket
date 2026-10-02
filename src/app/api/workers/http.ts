@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import {
-  InvalidPinError,
-  PinLockedError,
+  ForbiddenError,
   UnauthorizedError,
   ValidationError,
   WorkerAlreadyExistsError,
@@ -29,20 +28,8 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 // Centralized mapping of domain errors to HTTP. `code` lets the POS react
-// (e.g. show remaining attempts) without parsing messages.
+// (e.g. a duplicate DNI) without parsing messages.
 export function workerErrorResponse(error: unknown) {
-  if (error instanceof InvalidPinError) {
-    return NextResponse.json(
-      { code: "invalid_pin", error: error.message, attemptsLeft: error.attemptsLeft },
-      { status: 422 },
-    );
-  }
-  if (error instanceof PinLockedError) {
-    return NextResponse.json(
-      { code: "locked", error: error.message, minutes: error.minutes },
-      { status: 423 },
-    );
-  }
   if (error instanceof WorkerNotFoundError) {
     return NextResponse.json({ code: "not_found", error: error.message }, { status: 404 });
   }
@@ -62,6 +49,9 @@ export function workerErrorResponse(error: unknown) {
     );
   }
   if (error instanceof UnauthorizedError) return unauthorized();
+  if (error instanceof ForbiddenError) {
+    return NextResponse.json({ code: "forbidden", error: error.message }, { status: 403 });
+  }
 
   console.error("Worker request failed", error);
   return NextResponse.json(

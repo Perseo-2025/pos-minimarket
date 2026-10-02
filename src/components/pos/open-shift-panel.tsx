@@ -30,7 +30,7 @@ export function OpenShiftPanel({
   }
 
   return (
-    <div className="flex h-[calc(100vh-57px)] items-center justify-center p-4">
+    <div className="flex h-[calc(100dvh-57px-var(--app-footer-h))] items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/10 text-primary">

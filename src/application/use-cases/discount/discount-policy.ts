@@ -23,10 +23,10 @@ export async function updateDiscountPolicyUseCase(
     actorId,
     payload: {
       from: previous && {
-        discountPercent: previous.discountPercent,
+        maxDiscountedUnitsPerSale: previous.maxDiscountedUnitsPerSale,
         maxDiscountedSalesPerDay: previous.maxDiscountedSalesPerDay,
-        maxDiscountPerMonth: previous.maxDiscountPerMonth,
         pointsPerSol: previous.pointsPerSol,
+        birthdayGiftMaxAmount: previous.birthdayGiftMaxAmount,
       },
       to: data,
       policyId: created.id,

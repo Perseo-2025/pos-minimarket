@@ -20,7 +20,6 @@ export function CheckoutDialog({
   open,
   pricing,
   workerName,
-  courtesyApprovedBy,
   paymentType,
   onOpenChange,
   onConfirm,
@@ -28,7 +27,6 @@ export function CheckoutDialog({
   open: boolean;
   pricing: SalePricing;
   workerName: string | null;
-  courtesyApprovedBy: string | null;
   paymentType: PaymentType;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
@@ -49,7 +47,7 @@ export function CheckoutDialog({
           <span className="text-4xl font-bold tracking-tight tabular-nums">
             {formatSoles(pricing.total)}
           </span>
-          {(pricing.discountTotal > 0 || pricing.courtesyTotal > 0) && (
+          {(pricing.discountTotal > 0 || pricing.giftTotal > 0) && (
             <span className="flex flex-col items-center text-sm text-muted-foreground tabular-nums">
               <s>{formatSoles(pricing.subtotal)}</s>
               {pricing.discountTotal > 0 && (
@@ -57,10 +55,9 @@ export function CheckoutDialog({
                   −{formatSoles(pricing.discountTotal)} de descuento trabajador
                 </span>
               )}
-              {pricing.courtesyTotal > 0 && (
+              {pricing.giftTotal > 0 && (
                 <span className="font-medium text-brand-orange">
-                  −{formatSoles(pricing.courtesyTotal)} en cortesía
-                  {courtesyApprovedBy && ` (aprobó ${courtesyApprovedBy})`}
+                  −{formatSoles(pricing.giftTotal)} regalo de cumpleaños 🎂
                 </span>
               )}
             </span>

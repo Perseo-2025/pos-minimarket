@@ -48,7 +48,7 @@ export default async function PosPage() {
         categoryName: p.categoryName,
         categoryIcon: p.categoryIcon,
         priceSale: p.priceSale,
-        workerDiscountPercent: p.workerDiscountPercent,
+        workerDiscountAmount: p.workerDiscountAmount,
         imageUrl: p.imageUrl,
       }))}
     />

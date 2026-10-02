@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Nunito, Roboto } from "next/font/google";
 import { AuthSessionProvider } from "@/components/layout/auth-session-provider";
+import { SplashScreen } from "@/components/layout/splash-screen";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -22,8 +23,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "POS Minimarket",
-  description: "Punto de venta para minimarket",
+  title: "NAVEXPRESS",
+  description: "NAVEXPRESS: punto de venta para minimarket",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <AuthSessionProvider>{children}</AuthSessionProvider>
+        <SplashScreen />
         <Toaster />
       </body>
     </html>

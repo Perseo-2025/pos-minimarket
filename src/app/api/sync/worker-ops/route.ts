@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { recordPinFailureUseCase } from "@/application/use-cases/workers/record-pin-failure";
 import { registerWorkerUseCase } from "@/application/use-cases/workers/register-worker";
-import { requestPinResetUseCase } from "@/application/use-cases/workers/request-pin-reset";
 import { DNI_LOOKUP_TIMEOUT_MS, workerDeps } from "@/infrastructure/deps";
 import {
   readJson,
@@ -30,11 +28,10 @@ export async function POST(request: Request) {
             DNI_LOOKUP_TIMEOUT_MS,
           ),
         );
+      // Queued by older versions of the POS (workers had a PIN then): there
+      // is nothing left to record, so they are dropped from the queue.
       case "pin_reset":
-        await requestPinResetUseCase(workerDeps, data, user.id);
-        return NextResponse.json({ ok: true });
       case "pin_failed":
-        await recordPinFailureUseCase(workerDeps, data, user.id);
         return NextResponse.json({ ok: true });
       default:
         return NextResponse.json(

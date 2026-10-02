@@ -140,7 +140,7 @@ async function KardexContent({ productId }: { productId: number }) {
               <TableCell>{m.actorName ?? "—"}</TableCell>
               <TableCell className="max-w-64 text-sm text-muted-foreground">
                 {m.saleId !== null ? (
-                  <span className="font-mono text-xs">Ticket #{m.saleId}</span>
+                  <span className="font-mono text-xs">Orden #{m.saleId}</span>
                 ) : m.receiptId !== null ? (
                   <span className="text-xs">
                     Ingreso #{m.receiptId}

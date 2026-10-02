@@ -1,3 +1,4 @@
+import { syncAttendanceOps, touchDeviceClock } from "./attendance-ops";
 import { listPendingSales, markSaleStatus, markSaleSynced } from "./queue";
 import { syncShiftOps } from "./shift-ops";
 import { refreshWorkerSnapshot } from "./worker-cache";
@@ -64,9 +65,12 @@ export async function runSync() {
   try {
     sessionInvalid = false;
     // Till shifts first (a closing must follow its opening and movements),
-    // then worker registrations / PIN events, then the sales.
+    // then attendance marks (after the till: a clock-out must find the
+    // drawer already closed), then worker registrations, then
+    // the sales.
     try {
       await syncShiftOps();
+      await syncAttendanceOps();
     } catch (error) {
       if (error instanceof SessionRejectedError) {
         sessionInvalid = true;
@@ -101,10 +105,8 @@ export async function runSync() {
           clientCreatedAt: sale.clientCreatedAt,
           workerId: sale.workerId,
           workerVerification: sale.workerVerification,
-          verificationToken: sale.verificationToken,
           discountTotal: sale.discountTotal,
           policyId: sale.policyId,
-          courtesyToken: sale.courtesyToken,
         });
         salesSynced++;
       } catch (error) {
@@ -133,5 +135,8 @@ export function startSyncEngine() {
 
   window.addEventListener("online", () => void runSync());
   setInterval(() => void runSync(), 30_000);
+  // Also offline: notices the device clock being moved backwards.
+  void touchDeviceClock();
+  setInterval(() => void touchDeviceClock(), 30_000);
   void runSync();
 }

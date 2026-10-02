@@ -12,10 +12,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { PAYMENT_TYPE_LABELS, type PaymentType } from "@/domain/entities/sale";
+import { birthdayGiftAvailable } from "@/domain/services/birthday";
 import {
   buildWorkerDiscountRule,
-  lineTotal,
   priceSale,
+  saleLines,
 } from "@/domain/services/sale-pricing";
 import {
   CatalogAge,
@@ -31,20 +32,12 @@ import { useCashShift } from "@/hooks/use-cash-shift";
 import { enqueueSale } from "@/infrastructure/offline/queue";
 import { runSync } from "@/infrastructure/offline/sync-engine";
 import type { CachedPolicy, PendingSale } from "@/infrastructure/offline/types";
-import {
-  getWorkerSnapshot,
-  refreshWorkerSnapshot,
-} from "@/infrastructure/offline/worker-cache";
+import { refreshWorkerSnapshot } from "@/infrastructure/offline/worker-cache";
 import { storeDateKey } from "@/domain/value-objects/store-time";
 import { formatSoles } from "@/lib/money";
 import { CartPanel } from "./cart-panel";
 import { type SidebarCategory, CategorySidebar } from "./category-sidebar";
 import { CheckoutDialog } from "./checkout-dialog";
-import {
-  type CourtesyApproval,
-  type CourtesyLine,
-  CourtesyDialog,
-} from "./courtesy-dialog";
 import { type ShelfExpiry, ExpiryReminder } from "./expiry-reminder";
 import { OfflineIndicator } from "./offline-indicator";
 import { OpenShiftPanel } from "./open-shift-panel";
@@ -52,10 +45,6 @@ import { ProductGrid } from "./product-grid";
 import { SearchBar } from "./search-bar";
 import { ShiftMenu } from "./shift-menu";
 import { type AppliedWorker, WorkerDiscountDialog } from "./worker-discount-dialog";
-
-// A worker's PIN check is valid for one sale and a short time only: it can't
-// be reused for the next customers in the queue.
-const WORKER_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 
 type Product = {
   id: number;
@@ -65,7 +54,7 @@ type Product = {
   categoryName: string;
   categoryIcon: string | null;
   priceSale: number;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
   imageUrl?: string | null;
 };
 
@@ -98,19 +87,8 @@ export function PosScreen({
     applied: AppliedWorker;
     policy: CachedPolicy;
   } | null>(null);
-  const [courtesyApproval, setCourtesyApproval] = useState<CourtesyApproval | null>(
-    null,
-  );
-  // Courtesy lines the admin is being asked to approve (null = dialog closed),
-  // and the product that becomes free once they do.
-  const [courtesyRequest, setCourtesyRequest] = useState<{
-    saleUuid: string;
-    lines: CourtesyLine[];
-    addProductId: number | null;
-  } | null>(null);
-  // The sale's uuid exists before checkout: a courtesy approval is signed for
-  // it, and it is the sync's idempotency key (the numeric id comes later,
-  // from the server).
+  // The sale's uuid is the sync's idempotency key (the numeric id — the
+  // order number — comes later, from the server).
   const saleUuidRef = useRef<string | null>(null);
   function currentSaleUuid() {
     saleUuidRef.current ??= crypto.randomUUID();
@@ -123,8 +101,18 @@ export function PosScreen({
     void refreshWorkerSnapshot({ force: true });
   }, []);
 
+  // Checked when charging too: a till left open past midnight must not
+  // keep offering yesterday's birthday gift.
+  const giftAvailable =
+    worker !== null &&
+    birthdayGiftAvailable({
+      birthDate: worker.applied.birthDate,
+      giftUsedThisYear: worker.applied.usage.giftUsedThisYear,
+      giftMaxAmount: worker.policy.birthdayGiftMaxAmount,
+      at: new Date(),
+    });
   const discount = worker
-    ? buildWorkerDiscountRule(worker.policy, worker.applied.usage)
+    ? buildWorkerDiscountRule(worker.policy, worker.applied.usage, giftAvailable)
     : null;
   const pricing = priceSale(cart.items, discount?.rule ?? null);
 
@@ -132,79 +120,27 @@ export function PosScreen({
   if (worker && discount) {
     if (discount.limitReached === "daily") {
       workerNotice = `Ya usó sus ${worker.policy.maxDiscountedSalesPerDay} compras con descuento de hoy. Esta compra va sin descuento, pero suma puntos.`;
-    } else if (discount.limitReached === "monthly") {
-      workerNotice = `Llegó al tope de descuento del mes (${formatSoles(worker.policy.maxDiscountPerMonth)}). Esta compra va sin descuento, pero suma puntos.`;
-    } else if (pricing.capped) {
-      workerNotice = `Solo le quedaban ${formatSoles(discount.remainingThisMonth)} de descuento este mes.`;
+    } else if (pricing.unitsCapped) {
+      workerNotice = `El descuento aplica solo a las primeras ${worker.policy.maxDiscountedUnitsPerSale} unidades de la compra.`;
     }
   }
 
-  // The approval is signed for an exact amount: if the courtesy lines change
-  // afterwards (quantity, another product), the admin must approve again.
-  const courtesyNeedsApproval =
-    pricing.courtesyTotal > 0 &&
-    (courtesyApproval === null || courtesyApproval.amount !== pricing.courtesyTotal);
-
-  function courtesyLines(extraProductId: number | null): CourtesyLine[] {
-    return cart.items
-      .filter((item) => item.isCourtesy || item.productId === extraProductId)
-      .map((item) => ({
-        productId: item.productId,
-        productName: item.name,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-      }));
-  }
-
-  function toggleCourtesy(productId: number) {
+  function toggleGift(productId: number) {
     const item = cart.items.find((i) => i.productId === productId);
-    if (!item) return;
-    if (item.isCourtesy) {
-      cart.setCourtesy(productId, false);
-      return;
-    }
-    setMobileCartOpen(false);
-    setCourtesyRequest({
-      saleUuid: currentSaleUuid(),
-      lines: courtesyLines(productId),
-      addProductId: productId,
-    });
+    cart.setGift(item?.isGift ? null : productId);
   }
 
-  function handleCourtesyApproved(approval: CourtesyApproval) {
-    if (courtesyRequest?.addProductId != null) {
-      cart.setCourtesy(courtesyRequest.addProductId, true);
-    }
-    setCourtesyApproval(approval);
-    toast.success(`Cortesía aprobada por ${approval.adminName}`);
+  function applyWorker(applied: AppliedWorker, policy: CachedPolicy) {
+    setWorker({ applied, policy });
+    toast.success(`Descuento aplicado a ${applied.fullName}`);
   }
 
-  async function applyWorker(applied: AppliedWorker) {
-    const snapshot = await getWorkerSnapshot();
-    if (!snapshot?.policy) {
-      toast.error("El descuento no está configurado");
-      return;
-    }
-    setWorker({ applied, policy: snapshot.policy });
-    toast.success(`Descuento aplicado a ${applied.fullName}`, {
-      description:
-        applied.verification === "pin_offline"
-          ? "Clave verificada sin internet."
-          : "Clave verificada.",
-    });
+  function removeWorker() {
+    setWorker(null);
+    cart.setGift(null);
   }
 
   function startCheckout() {
-    if (
-      worker &&
-      Date.now() - worker.applied.verifiedAt > WORKER_VERIFICATION_TTL_MS
-    ) {
-      setWorker(null);
-      toast.warning("La verificación del trabajador venció", {
-        description: "Vuelve a pedirle su DNI y clave para aplicar el descuento.",
-      });
-      return false;
-    }
     setCheckoutOpen(true);
     return true;
   }
@@ -243,33 +179,34 @@ export function PosScreen({
       : products.filter((p) => p.categoryId === selectedCategory);
 
   async function handleConfirm() {
-    if (courtesyNeedsApproval) return;
+    const lines = saleLines(cart.items, pricing);
     const sale: PendingSale = {
       id: currentSaleUuid(),
       cashierId,
       shiftUuid: cash.shift?.uuid,
       paymentType,
-      items: cart.items.map((item, index) => ({
-        productId: item.productId,
-        productName: item.name,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        lineTotal: lineTotal(item),
-        discountPercent: pricing.lines[index].discountPercent,
-        discountAmount: pricing.lines[index].discountAmount,
-        isCourtesy: item.isCourtesy,
-        captureSource: item.captureSource,
-      })),
-      ...(pricing.courtesyTotal > 0 &&
-        courtesyApproval && { courtesyToken: courtesyApproval.token }),
+      items: lines.map((line) => {
+        const item = cart.items[line.index];
+        return {
+          productId: item.productId,
+          productName: item.name,
+          unitPrice: item.unitPrice,
+          quantity: line.quantity,
+          lineTotal: line.lineTotal,
+          discountUnitAmount: line.discountUnitAmount,
+          discountAmount: line.discountAmount,
+          isGift: line.isGift,
+          captureSource: item.captureSource,
+        };
+      }),
       subtotal: pricing.subtotal,
       discountTotal: pricing.discountTotal,
+      giftTotal: pricing.giftTotal,
       total: pricing.total,
       clientCreatedAt: new Date().toISOString(),
       ...(worker && {
         workerId: worker.applied.id,
-        workerVerification: worker.applied.verification,
-        verificationToken: worker.applied.token,
+        workerVerification: "dni_manual",
         policyId: worker.policy.id,
       }),
       status: "pending",
@@ -284,10 +221,9 @@ export function PosScreen({
 
     cart.clear();
     setCheckoutOpen(false);
-    // The worker and any courtesy belong to this sale only: the next
-    // customer starts clean, with a new sale uuid.
+    // The worker belongs to this sale only: the next customer starts clean,
+    // with a new sale uuid.
     setWorker(null);
-    setCourtesyApproval(null);
     saleUuidRef.current = null;
     // Most sales are cash — start the next one from there.
     setPaymentType("cash");
@@ -330,7 +266,7 @@ export function PosScreen({
   const feedback = useScanFlash();
 
   // The ring reader at the till: a scan adds the unit to the basket. Paused
-  // while a dialog (charge, worker, courtesy) has the cashier's attention.
+  // while a dialog (charge, worker) has the cashier's attention.
   const { lastScanAt } = useScanner(
     (code, source) => {
       const target = barcodes.get(code);
@@ -358,7 +294,7 @@ export function PosScreen({
       });
     },
     {
-      enabled: !checkoutOpen && !workerDialogOpen && courtesyRequest === null,
+      enabled: !checkoutOpen && !workerDialogOpen,
     },
   );
 
@@ -380,7 +316,7 @@ export function PosScreen({
   if (!cash.shift) return <OpenShiftPanel onOpen={cash.open} />;
 
   return (
-    <div className="flex h-[calc(100vh-57px)]">
+    <div className="flex h-[calc(100dvh-57px-var(--app-footer-h))]">
       <ScanFlash flash={feedback.flash} />
       <CategorySidebar
         categories={categories}
@@ -434,25 +370,14 @@ export function PosScreen({
             setMobileCartOpen(false);
             setWorkerDialogOpen(true);
           }}
-          onRemoveWorker={() => setWorker(null)}
+          onRemoveWorker={removeWorker}
           paymentType={paymentType}
           onPaymentTypeChange={setPaymentType}
           onIncrease={increaseQty}
           onDecrease={decreaseQty}
           onRemove={cart.removeItem}
-          onToggleCourtesy={toggleCourtesy}
-          courtesy={{
-            approvedBy: courtesyApproval?.adminName ?? null,
-            needsApproval: courtesyNeedsApproval,
-          }}
-          onRequestCourtesyApproval={() => {
-            setMobileCartOpen(false);
-            setCourtesyRequest({
-              saleUuid: currentSaleUuid(),
-              lines: courtesyLines(null),
-              addProductId: null,
-            });
-          }}
+          gift={worker && giftAvailable ? { maxAmount: worker.policy.birthdayGiftMaxAmount } : null}
+          onToggleGift={toggleGift}
           onCheckout={startCheckout}
         />
       </div>
@@ -474,26 +399,15 @@ export function PosScreen({
                 setMobileCartOpen(false);
                 setWorkerDialogOpen(true);
               }}
-              onRemoveWorker={() => setWorker(null)}
+              onRemoveWorker={removeWorker}
               paymentType={paymentType}
               onPaymentTypeChange={setPaymentType}
               showTitle={false}
               onIncrease={increaseQty}
               onDecrease={decreaseQty}
               onRemove={cart.removeItem}
-              onToggleCourtesy={toggleCourtesy}
-              courtesy={{
-                approvedBy: courtesyApproval?.adminName ?? null,
-                needsApproval: courtesyNeedsApproval,
-              }}
-              onRequestCourtesyApproval={() => {
-                setMobileCartOpen(false);
-                setCourtesyRequest({
-              saleUuid: currentSaleUuid(),
-              lines: courtesyLines(null),
-              addProductId: null,
-            });
-              }}
+              gift={worker && giftAvailable ? { maxAmount: worker.policy.birthdayGiftMaxAmount } : null}
+              onToggleGift={toggleGift}
               onCheckout={() => {
                 setMobileCartOpen(false);
                 startCheckout();
@@ -506,22 +420,14 @@ export function PosScreen({
         open={checkoutOpen}
         pricing={pricing}
         workerName={worker?.applied.fullName ?? null}
-        courtesyApprovedBy={courtesyApproval?.adminName ?? null}
         paymentType={paymentType}
         onOpenChange={setCheckoutOpen}
         onConfirm={handleConfirm}
       />
-      <CourtesyDialog
-        open={courtesyRequest !== null}
-        onOpenChange={(open) => !open && setCourtesyRequest(null)}
-        saleUuid={courtesyRequest?.saleUuid ?? ""}
-        lines={courtesyRequest?.lines ?? []}
-        onApproved={handleCourtesyApproved}
-      />
       <WorkerDiscountDialog
         open={workerDialogOpen}
         onOpenChange={setWorkerDialogOpen}
-        onApplied={(applied) => void applyWorker(applied)}
+        onApplied={applyWorker}
       />
     </div>
   );

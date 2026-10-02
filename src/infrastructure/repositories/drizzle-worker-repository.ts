@@ -1,9 +1,8 @@
 import { and, count, desc, eq, gt, gte, ne, sql } from "drizzle-orm";
-import {
-  type WorkerNameSource,
-  type WorkerStatus,
-  type WorkerWithPin,
-  withoutPin,
+import type {
+  Worker,
+  WorkerNameSource,
+  WorkerStatus,
 } from "@/domain/entities/worker";
 import type {
   CreateWorkerData,
@@ -17,7 +16,7 @@ type WorkerRow = typeof workers.$inferSelect & {
   registeredByName?: string | null;
 };
 
-function toWorker(row: WorkerRow): WorkerWithPin {
+function toWorker(row: WorkerRow): Worker {
   return {
     id: row.id,
     uuid: row.uuid,
@@ -25,6 +24,7 @@ function toWorker(row: WorkerRow): WorkerWithPin {
     fullName: row.fullName,
     nameSource: row.nameSource,
     company: row.company,
+    birthDate: row.birthDate,
     status: row.status,
     pendingReason: row.status === "pending" ? row.pendingReason : null,
     pointsBalance: row.pointsBalance,
@@ -32,7 +32,6 @@ function toWorker(row: WorkerRow): WorkerWithPin {
     registeredByName: row.registeredByName ?? null,
     approvedAt: row.approvedAt,
     createdAt: row.createdAt,
-    pinHash: row.pinHash,
   };
 }
 
@@ -43,8 +42,19 @@ function selectWorkers() {
     .leftJoin(users, eq(workers.registeredBy, users.id));
 }
 
-// Only sales that actually had a discount count toward the caps.
+// Only sales that actually had a discount count toward the daily cap; a
+// birthday gift is any free line (courtesy_total) in the year.
 const discounted = gt(sales.discountTotal, "0");
+const withGift = gt(sales.giftTotal, "0");
+
+function usageColumns(dayStart: Date) {
+  return {
+    today: sql<number>`count(*) filter (where ${discounted} and ${sales.clientCreatedAt} >= ${dayStart.toISOString()}::timestamptz)`.mapWith(
+      Number,
+    ),
+    gifts: sql<number>`count(*) filter (where ${withGift})`.mapWith(Number),
+  };
+}
 
 export class DrizzleWorkerRepository implements WorkerRepository {
   async findById(id: number) {
@@ -63,7 +73,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       desc(workers.createdAt),
     );
     return rows.map((row) =>
-      withoutPin(toWorker({ ...row.worker, registeredByName: row.registeredByName })),
+      toWorker({ ...row.worker, registeredByName: row.registeredByName }),
     );
   }
 
@@ -92,7 +102,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
         fullName: data.fullName,
         nameSource: data.nameSource,
         company: data.company,
-        pinHash: data.pinHash,
+        birthDate: data.birthDate,
         status: "pending",
         pendingReason: "new",
         registeredBy: data.registeredById,
@@ -100,19 +110,6 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       .onConflictDoNothing({ target: workers.uuid })
       .returning({ id: workers.id });
     return rows[0]?.id ?? null;
-  }
-
-  async replacePin(id: number, pinHash: string) {
-    await db
-      .update(workers)
-      .set({
-        pinHash,
-        pinUpdatedAt: new Date(),
-        status: "pending",
-        pendingReason: "pin_reset",
-        updatedAt: new Date(),
-      })
-      .where(eq(workers.id, id));
   }
 
   async setStatus(id: number, status: WorkerStatus, actorId: number) {
@@ -135,68 +132,61 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       .where(eq(workers.id, id));
   }
 
-  async discountUsage(workerId: number, dayStart: Date, monthStart: Date) {
+  async updateBirthDate(id: number, birthDate: string) {
+    await db
+      .update(workers)
+      .set({ birthDate, updatedAt: new Date() })
+      .where(eq(workers.id, id));
+  }
+
+  async discountUsage(workerId: number, dayStart: Date, yearStart: Date) {
     const [row] = await db
-      .select({
-        today: sql<number>`count(*) filter (where ${sales.clientCreatedAt} >= ${dayStart.toISOString()}::timestamptz)`.mapWith(
-          Number,
-        ),
-        month: sql<string>`coalesce(sum(${sales.discountTotal}), 0)`,
-      })
+      .select(usageColumns(dayStart))
       .from(sales)
       .where(
         and(
           eq(sales.workerId, workerId),
-          discounted,
           ne(sales.status, "voided"),
-          gte(sales.clientCreatedAt, monthStart),
+          gte(sales.clientCreatedAt, yearStart),
         ),
       );
 
     return {
       discountedSalesToday: row?.today ?? 0,
-      discountThisMonth: Number(row?.month ?? 0),
+      giftUsedThisYear: (row?.gifts ?? 0) > 0,
     };
   }
 
-  async offlineSnapshot(dayStart: Date, monthStart: Date): Promise<OfflineWorker[]> {
+  async offlineSnapshot(dayStart: Date, yearStart: Date): Promise<OfflineWorker[]> {
+    const columns = usageColumns(dayStart);
     const usage = db
       .select({
         workerId: sales.workerId,
-        today: sql<number>`count(*) filter (where ${sales.clientCreatedAt} >= ${dayStart.toISOString()}::timestamptz)`
-          .mapWith(Number)
-          .as("today"),
-        month: sql<string>`coalesce(sum(${sales.discountTotal}), 0)`.as("month"),
+        today: columns.today.as("today"),
+        gifts: columns.gifts.as("gifts"),
       })
       .from(sales)
-      .where(
-        and(discounted, ne(sales.status, "voided"), gte(sales.clientCreatedAt, monthStart)),
-      )
+      .where(and(ne(sales.status, "voided"), gte(sales.clientCreatedAt, yearStart)))
       .groupBy(sales.workerId)
       .as("usage");
 
     const rows = await db
-      .select({
-        worker: workers,
-        today: usage.today,
-        month: usage.month,
-      })
+      .select({ worker: workers, today: usage.today, gifts: usage.gifts })
       .from(workers)
       .leftJoin(usage, eq(usage.workerId, workers.id))
       .where(ne(workers.status, "rejected"));
 
-    return rows.map(({ worker, today, month }) => ({
+    return rows.map(({ worker, today, gifts }) => ({
       id: worker.id,
       dni: worker.dni,
       fullName: worker.fullName,
       company: worker.company,
+      birthDate: worker.birthDate,
       status: worker.status,
-      // Only active workers can get a discount, so only they need a hash.
-      pinHash: worker.status === "active" ? worker.pinHash : null,
       pointsBalance: worker.pointsBalance,
       usage: {
         discountedSalesToday: Number(today ?? 0),
-        discountThisMonth: Number(month ?? 0),
+        giftUsedThisYear: Number(gifts ?? 0) > 0,
       },
     }));
   }
@@ -209,6 +199,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
         cashierName: users.name,
         subtotal: sales.subtotal,
         discountTotal: sales.discountTotal,
+        giftTotal: sales.giftTotal,
         total: sales.total,
         pointsEarned: sales.pointsEarned,
         auditFlags: sales.auditFlags,
@@ -223,6 +214,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       ...row,
       subtotal: Number(row.subtotal),
       discountTotal: Number(row.discountTotal),
+      giftTotal: Number(row.giftTotal),
       total: Number(row.total),
     }));
   }

@@ -10,7 +10,7 @@ export interface CreateProductData {
   priceCost: number | null;
   // Expiry control: null = follow the category.
   tracksExpiry: boolean | null;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
   imageUrl?: string | null;
 }
 

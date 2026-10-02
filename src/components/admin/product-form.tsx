@@ -39,7 +39,7 @@ type Product = {
   priceCost: string | null;
   // Expiry control set on the product; null = follow the category.
   tracksExpiry: boolean | null;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
   imageUrl: string | null;
 };
 
@@ -104,7 +104,7 @@ export function ProductForm({
     toExpiryChoice(product?.tracksExpiry),
   );
   const [workerDiscount, setWorkerDiscount] = useState(
-    product?.workerDiscountPercent ?? 0,
+    product?.workerDiscountAmount ?? 0,
   );
   const [imageUrl, setImageUrl] = useState(savedImageUrl);
   const [uploading, setUploading] = useState(false);
@@ -120,7 +120,7 @@ export function ProductForm({
     setPriceSale(product?.priceSale ?? "");
     setPriceCost(product?.priceCost ?? "");
     setExpiry(toExpiryChoice(product?.tracksExpiry));
-    setWorkerDiscount(product?.workerDiscountPercent ?? 0);
+    setWorkerDiscount(product?.workerDiscountAmount ?? 0);
     setImageUrl(savedImageUrl);
   }
 
@@ -157,7 +157,7 @@ export function ProductForm({
         priceSale,
         priceCost,
         tracksExpiry: EXPIRY_CHOICES[expiry],
-        workerDiscountPercent: workerDiscount,
+        workerDiscountAmount: workerDiscount,
         imageUrl,
       };
       try {
@@ -301,7 +301,7 @@ export function ProductForm({
           <ProfitPreview
             priceSale={Number(priceSale) || 0}
             priceCost={priceCost === "" ? null : Number(priceCost)}
-            workerDiscountPercent={workerDiscount}
+            workerDiscountAmount={workerDiscount}
           />
           <div className="flex flex-col gap-2">
             <Label id="product-expiry-label">Fecha de vencimiento</Label>

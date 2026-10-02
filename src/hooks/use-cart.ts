@@ -15,7 +15,7 @@ export function useCart() {
     id: number;
     name: string;
     priceSale: number;
-    workerDiscountPercent: number;
+    workerDiscountAmount: number;
   }, source: CaptureSource = "manual") {
     setItems((prev) => {
       const existing = prev.find((item) => item.productId === product.id);
@@ -37,8 +37,8 @@ export function useCart() {
           name: product.name,
           unitPrice: product.priceSale,
           quantity: 1,
-          workerDiscountPercent: product.workerDiscountPercent,
-          isCourtesy: false,
+          workerDiscountAmount: product.workerDiscountAmount,
+          isGift: false,
           captureSource: source,
         },
       ];
@@ -57,11 +57,10 @@ export function useCart() {
     );
   }
 
-  function setCourtesy(productId: number, isCourtesy: boolean) {
+  // Only one line holds the birthday gift.
+  function setGift(productId: number | null) {
     setItems((prev) =>
-      prev.map((item) =>
-        item.productId === productId ? { ...item, isCourtesy } : item,
-      ),
+      prev.map((item) => ({ ...item, isGift: item.productId === productId })),
     );
   }
 
@@ -81,5 +80,5 @@ export function useCart() {
     [items],
   );
 
-  return { items, addItem, setQuantity, setCourtesy, removeItem, clear, total };
+  return { items, addItem, setQuantity, setGift, removeItem, clear, total };
 }

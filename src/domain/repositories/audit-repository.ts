@@ -17,7 +17,8 @@ export interface AuditRepository {
     types?: AuditEventType[];
     limit: number;
   }): Promise<AuditEvent[]>;
-  countPinFailuresSince(workerId: number, since: Date): Promise<number>;
+  // Failed "Mis puntos" logins for a worker since the given time (lockout).
+  countStatementFailuresSince(workerId: number, since: Date): Promise<number>;
   cashierSummary(from: Date, to: Date): Promise<CashierAuditSummary[]>;
   flaggedSales(from: Date, to: Date): Promise<FlaggedSale[]>;
 }

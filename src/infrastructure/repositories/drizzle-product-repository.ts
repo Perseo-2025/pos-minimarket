@@ -31,7 +31,7 @@ function toProduct({ product: row, category }: ProductRow): Product {
     categoryName: category.name,
     categoryIcon: category.icon as CategoryIcon | null,
     priceSale: Number(row.priceSale),
-    workerDiscountPercent: Number(row.workerDiscountPercent),
+    workerDiscountAmount: Number(row.workerDiscountAmount),
     priceCost: row.priceCost === null ? null : Number(row.priceCost),
     stockQuantity: row.stockQuantity,
     trackStock: row.trackStock,
@@ -107,7 +107,7 @@ export class DrizzleProductRepository implements ProductRepository {
       priceSale: data.priceSale.toString(),
       priceCost: data.priceCost?.toString() ?? null,
       tracksExpiry: data.tracksExpiry,
-      workerDiscountPercent: data.workerDiscountPercent.toString(),
+      workerDiscountAmount: data.workerDiscountAmount.toFixed(2),
       imageUrl: data.imageUrl ?? null,
     });
   }
@@ -123,7 +123,7 @@ export class DrizzleProductRepository implements ProductRepository {
         priceSale: data.priceSale.toString(),
         priceCost: data.priceCost?.toString() ?? null,
         tracksExpiry: data.tracksExpiry,
-        workerDiscountPercent: data.workerDiscountPercent.toString(),
+        workerDiscountAmount: data.workerDiscountAmount.toFixed(2),
         imageUrl: data.imageUrl,
         updatedAt: new Date(),
       })
@@ -164,7 +164,7 @@ export class DrizzleProductRepository implements ProductRepository {
       .select({
         id: products.id,
         priceSale: products.priceSale,
-        workerDiscountPercent: products.workerDiscountPercent,
+        workerDiscountAmount: products.workerDiscountAmount,
       })
       .from(products)
       .where(inArray(products.id, ids));
@@ -174,7 +174,7 @@ export class DrizzleProductRepository implements ProductRepository {
         row.id,
         {
           price: Number(row.priceSale),
-          workerDiscountPercent: Number(row.workerDiscountPercent),
+          workerDiscountAmount: Number(row.workerDiscountAmount),
         },
       ]),
     );

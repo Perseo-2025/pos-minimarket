@@ -12,9 +12,9 @@ import type { SaleRepository } from "@/domain/repositories/sale-repository";
 import type { UserRepository } from "@/domain/repositories/user-repository";
 import type { WorkerRepository } from "@/domain/repositories/worker-repository";
 import { evaluateSaleFlags } from "@/domain/services/sale-audit";
-import { lineTotal, uniformDiscountPercent } from "@/domain/services/sale-pricing";
+import { lineTotal } from "@/domain/services/sale-pricing";
 import { round2 } from "@/domain/value-objects/money";
-import { storeDayStart, storeMonthStart } from "@/domain/value-objects/store-time";
+import { storeDayStart, storeYearStart } from "@/domain/value-objects/store-time";
 import { saleCreateSchema } from "@/application/validation/sale";
 
 export interface CreateSaleDeps {
@@ -23,15 +23,6 @@ export interface CreateSaleDeps {
   products: ProductRepository;
   workers: WorkerRepository;
   policies: DiscountPolicyRepository;
-  verifyWorkerToken: (
-    token: string | undefined,
-    expected: { workerId: number; cashierId: number; at: Date },
-  ) => boolean;
-  // Returns the approving admin's id, or null.
-  verifyCourtesyToken: (
-    token: string | undefined,
-    expected: { saleUuid: string; cashierId: number; amount: number; at: Date },
-  ) => number | null;
 }
 
 export async function createSaleUseCase(
@@ -68,19 +59,25 @@ export async function createSaleUseCase(
   }
 
   // Never trust client-computed amounts: line totals are recomputed, each
-  // line's discount is clamped to its gross amount (a courtesy line takes
-  // none: it is given away whole), and everything is compared against the
-  // catalog below.
+  // line's discount is clamped to its gross amount (a gift line takes none:
+  // it is given away whole), and everything is compared against the catalog
+  // below.
   const items = allocateLegacyDiscount(
-    data.items.map((item) => {
+    data.items.map(({ isCourtesy, ...item }) => {
       const gross = lineTotal(item);
+      const isGift = item.isGift ?? isCourtesy ?? false;
+      const discountAmount = isGift
+        ? 0
+        : round2(Math.min(Math.max(0, item.discountAmount), gross));
       return {
         ...item,
         lineTotal: gross,
-        discountAmount: item.isCourtesy
-          ? 0
-          : round2(Math.min(Math.max(0, item.discountAmount), gross)),
-        discountPercent: item.isCourtesy ? 0 : item.discountPercent,
+        isGift,
+        discountAmount,
+        discountUnitAmount:
+          discountAmount === 0
+            ? 0
+            : round2(item.discountUnitAmount || discountAmount / item.quantity),
       };
     }),
     data.discountTotal,
@@ -89,10 +86,10 @@ export async function createSaleUseCase(
   const chargedDiscount = round2(
     items.reduce((sum, item) => sum + item.discountAmount, 0),
   );
-  const courtesyTotal = round2(
-    items.reduce((sum, item) => sum + (item.isCourtesy ? item.lineTotal : 0), 0),
+  const giftTotal = round2(
+    items.reduce((sum, item) => sum + (item.isGift ? item.lineTotal : 0), 0),
   );
-  const total = round2(subtotal - chargedDiscount - courtesyTotal);
+  const total = round2(subtotal - chargedDiscount - giftTotal);
 
   const catalog = await repos.products.findCatalogByIds([
     ...new Set(items.map((item) => item.productId)),
@@ -108,46 +105,22 @@ export async function createSaleUseCase(
     ? await repos.workers.discountUsage(
         worker.id,
         storeDayStart(soldAt),
-        storeMonthStart(soldAt),
+        storeYearStart(soldAt),
       )
     : null;
-
-  const verification = worker ? data.workerVerification : "none";
-  const tokenValid =
-    worker !== null &&
-    verification === "pin_online" &&
-    repos.verifyWorkerToken(data.verificationToken, {
-      workerId: worker.id,
-      cashierId,
-      at: soldAt,
-    });
-
-  const courtesyApprovedBy =
-    courtesyTotal > 0
-      ? repos.verifyCourtesyToken(data.courtesyToken, {
-          saleUuid: data.uuid,
-          cashierId,
-          amount: courtesyTotal,
-          at: soldAt,
-        })
-      : null;
 
   const flags: AuditFlag[] = evaluateSaleFlags({
     lines: items,
     catalog,
     chargedDiscount,
-    courtesyTotal,
-    courtesyApproved: courtesyApprovedBy !== null,
+    giftTotal,
+    soldAt,
     worker,
-    verification,
-    tokenValid,
     policy,
     usage,
   });
   // The POS referenced a worker the server doesn't know.
-  if (data.workerId && !worker && !flags.includes("INVALID_VERIFICATION")) {
-    flags.push("INVALID_VERIFICATION");
-  }
+  if (data.workerId && !worker) flags.push("INVALID_VERIFICATION");
 
   const earnsPoints =
     worker !== null &&
@@ -163,13 +136,11 @@ export async function createSaleUseCase(
     clientCreatedAt: data.clientCreatedAt,
     subtotal,
     discountTotal: chargedDiscount,
-    discountPercent: uniformDiscountPercent(items),
-    courtesyTotal,
-    courtesyApprovedBy,
+    giftTotal,
     total,
     workerId: worker?.id ?? null,
     policyId: policy?.id ?? null,
-    workerVerification: verification,
+    workerVerification: worker ? data.workerVerification : "none",
     pointsEarned: earnsPoints ? Math.floor(total * policy.pointsPerSol) : 0,
     auditFlags: flags,
   };
@@ -181,14 +152,14 @@ export async function createSaleUseCase(
 // discountTotal. Spread it over the lines (in order, never above a line's
 // amount) so the per-line audit and history still make sense.
 function allocateLegacyDiscount<
-  T extends { lineTotal: number; discountAmount: number; isCourtesy: boolean },
+  T extends { lineTotal: number; discountAmount: number; isGift: boolean },
 >(items: T[], legacyTotal: number): T[] {
   const hasLineDiscounts = items.some((item) => item.discountAmount > 0);
   if (hasLineDiscounts || legacyTotal <= 0) return items;
 
   let remaining = round2(legacyTotal);
   return items.map((item) => {
-    if (item.isCourtesy || remaining <= 0) return item;
+    if (item.isGift || remaining <= 0) return item;
     const amount = round2(Math.min(item.lineTotal, remaining));
     remaining = round2(remaining - amount);
     return { ...item, discountAmount: amount };

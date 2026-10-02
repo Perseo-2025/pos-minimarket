@@ -35,7 +35,7 @@ export function planStockCount(input: {
 }
 
 // A sale can list the same product on several lines (e.g. one paid, one
-// given away as courtesy): both leave the shelf, so stock moves once per
+// given away as the birthday gift): both leave the shelf, so stock moves once per
 // product with the summed quantity.
 export function aggregateQuantities<K>(
   items: { productId: K; quantity: number }[],

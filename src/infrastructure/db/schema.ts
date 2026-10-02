@@ -11,6 +11,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  time,
   timestamp,
   uniqueIndex,
   uuid,
@@ -48,10 +49,13 @@ export const workerNameSourceEnum = pgEnum("worker_name_source", [
   "api",
   "manual",
 ]);
+// "dni_manual" is how workers are identified today; the pin_* values remain
+// on sales from when workers had a PIN.
 export const workerVerificationEnum = pgEnum("worker_verification", [
   "none",
   "pin_online",
   "pin_offline",
+  "dni_manual",
 ]);
 export const loyaltyMovementTypeEnum = pgEnum("loyalty_movement_type", [
   "earn",
@@ -113,6 +117,19 @@ export const stockMovementTypeEnum = pgEnum("stock_movement_type", [
 // How a line's product was identified (barcode reader or by hand); null on
 // lines recorded before the reader existed.
 export const captureSourceEnum = pgEnum("capture_source", ["scan", "manual"]);
+export const attendanceStatusEnum = pgEnum("attendance_status", [
+  "open",
+  "closed",
+  "missing_clock_out",
+]);
+export const attendanceFieldEnum = pgEnum("attendance_field", [
+  "clock_in",
+  "clock_out",
+]);
+export const attendanceCorrectionStatusEnum = pgEnum(
+  "attendance_correction_status",
+  ["pending", "approved", "rejected"],
+);
 
 export const users = pgTable("users", {
   id: integer("id_user").primaryKey().generatedByDefaultAsIdentity(),
@@ -218,11 +235,10 @@ export const products = pgTable(
       .notNull()
       .references(() => categories.id),
     priceSale: numeric("price_sale", { precision: 10, scale: 2 }).notNull(),
-    // Discount airport workers get on this product (0–99). Giving a product
-    // away (100%) is a courtesy approved by an admin at the till, not a
-    // product setting.
-    workerDiscountPercent: numeric("worker_discount_percent", {
-      precision: 5,
+    // Soles an identified airport worker gets off each unit (always below
+    // the price; only the first units of a purchase, see discount_policies).
+    workerDiscountAmount: numeric("worker_discount_amount", {
+      precision: 10,
       scale: 2,
     })
       .notNull()
@@ -341,11 +357,8 @@ export const workers = pgTable(
     fullName: text("full_name").notNull(),
     nameSource: workerNameSourceEnum("name_source").notNull(),
     company: text("company").notNull(),
-    // "pbkdf2-sha256$<iterations>$<salt>$<hash>" — see pin-hash.ts.
-    pinHash: text("pin_hash").notNull(),
-    pinUpdatedAt: timestamp("pin_updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    // For the birthday gift. Null on workers registered before it was asked.
+    birthDate: date("birth_date", { mode: "string" }),
     status: workerStatusEnum("status").notNull().default("pending"),
     pendingReason: workerPendingReasonEnum("pending_reason").default("new"),
     // Denormalized sum of loyalty_ledger, updated in the same transaction.
@@ -366,15 +379,32 @@ export const workers = pgTable(
 // Versioned discount rules: never updated, a change inserts a new row.
 export const discountPolicies = pgTable("discount_policies", {
   id: integer("id_policy").primaryKey().generatedByDefaultAsIdentity(),
+  // Legacy (kept for old versions): the global % and the monthly cap.
   discountPercent: numeric("discount_percent", {
     precision: 5,
     scale: 2,
-  }).notNull(),
+  })
+    .notNull()
+    .default("0"),
   maxDiscountedSalesPerDay: integer("max_discounted_sales_per_day").notNull(),
   maxDiscountPerMonth: numeric("max_discount_per_month", {
     precision: 10,
     scale: 2,
-  }).notNull(),
+  })
+    .notNull()
+    .default("0"),
+  // Units of a purchase that get their product's discount (the first ones
+  // in the basket).
+  maxDiscountedUnitsPerSale: integer("max_discounted_units_per_sale")
+    .notNull()
+    .default(3),
+  // Highest price of the birthday gift (0 = no gift).
+  birthdayGiftMaxAmount: numeric("birthday_gift_max_amount", {
+    precision: 10,
+    scale: 2,
+  })
+    .notNull()
+    .default("0"),
   pointsPerSol: numeric("points_per_sol", { precision: 5, scale: 2 }).notNull(),
   isActive: boolean("is_active").notNull().default(true),
   createdBy: integer("created_by").references(() => users.id),
@@ -388,7 +418,7 @@ export const sales = pgTable(
   {
     id: integer("id_sale").primaryKey().generatedByDefaultAsIdentity(),
     // Client-generated (offline sales supply their own): the idempotency key
-    // of the sync and what a courtesy approval is signed for. defaultRandom()
+    // of the sync. defaultRandom()
     // is only a fallback for server-side inserts (e.g. seed).
     uuid: uuid("uuid").notNull().unique().defaultRandom(),
     cashierId: integer("id_cashier")
@@ -396,18 +426,21 @@ export const sales = pgTable(
       .references(() => users.id),
     status: saleStatusEnum("status").notNull().default("completed"),
     paymentType: paymentTypeEnum("payment_type").notNull(),
-    // subtotal - discount_total = total (what the customer actually paid).
+    // subtotal - discount_total - courtesy_total = total (what the customer
+    // actually paid).
     subtotal: numeric("subtotal", { precision: 10, scale: 2 }).notNull(),
     discountTotal: numeric("discount_total", { precision: 10, scale: 2 })
       .notNull()
       .default("0"),
+    // Legacy: the sale-level % from before per-product discounts.
     discountPercent: numeric("discount_percent", { precision: 5, scale: 2 })
       .notNull()
       .default("0"),
     total: numeric("total", { precision: 10, scale: 2 }).notNull(),
-    // Value of the lines given away as courtesy (part of subtotal, not of
-    // total), and the admin who approved them at the till.
-    courtesyTotal: numeric("courtesy_total", { precision: 10, scale: 2 })
+    // Value of the lines given away (part of subtotal, not of total): the
+    // worker's birthday gift. On older sales, courtesies approved by the
+    // admin in courtesy_approved_by.
+    giftTotal: numeric("courtesy_total", { precision: 10, scale: 2 })
       .notNull()
       .default("0"),
     courtesyApprovedBy: integer("courtesy_approved_by").references(
@@ -506,6 +539,114 @@ export const cashMovements = pgTable(
   (table) => [index("cash_movements_shift_idx").on(table.shiftUuid)],
 );
 
+// Weekly work schedule of a staff member: one row per working weekday
+// (0 = Sunday … 6 = Saturday). A weekday without a row is a day off. An end
+// before the start means the shift ends the next day.
+export const workSchedules = pgTable(
+  "work_schedules",
+  {
+    id: integer("id_work_schedule").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("id_user")
+      .notNull()
+      .references(() => users.id),
+    weekday: integer("weekday").notNull(),
+    startTime: time("start_time").notNull(),
+    endTime: time("end_time").notNull(),
+    toleranceMin: integer("tolerance_min").notNull().default(10),
+    updatedBy: integer("id_updated_by").references(() => users.id),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("work_schedules_user_weekday_idx").on(table.userId, table.weekday),
+  ],
+);
+
+// One workday of a staff member, from "Marcar entrada" to "Marcar salida".
+// Created on the device (uuid) so it works without internet. The effective
+// times (clock_in_at / clock_out_at) are what reports use; the device and
+// server-received times are kept untouched as evidence. Corrections never
+// overwrite silently: each one is a row in attendance_corrections.
+export const attendanceRecords = pgTable(
+  "attendance_records",
+  {
+    id: integer("id_attendance").primaryKey().generatedByDefaultAsIdentity(),
+    uuid: uuid("uuid").notNull().unique(),
+    userId: integer("id_user")
+      .notNull()
+      .references(() => users.id),
+    // Store-zone date of the clock-in (a night shift belongs to the day it
+    // started).
+    workDate: date("work_date", { mode: "string" }).notNull(),
+    clockInAt: timestamp("clock_in_at", { withTimezone: true }).notNull(),
+    clockInDeviceAt: timestamp("clock_in_device_at", { withTimezone: true }),
+    clockInReceivedAt: timestamp("clock_in_received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
+    clockOutDeviceAt: timestamp("clock_out_device_at", { withTimezone: true }),
+    clockOutReceivedAt: timestamp("clock_out_received_at", { withTimezone: true }),
+    // Snapshot of the schedule at clock-in: changing the schedule later must
+    // not change past lateness. Null = worked on a day off.
+    scheduledStart: timestamp("scheduled_start", { withTimezone: true }),
+    scheduledEnd: timestamp("scheduled_end", { withTimezone: true }),
+    toleranceMin: integer("tolerance_min"),
+    lateMinutes: integer("late_minutes").notNull().default(0),
+    earlyLeaveMinutes: integer("early_leave_minutes").notNull().default(0),
+    status: attendanceStatusEnum("status").notNull().default("open"),
+    // Marked without internet (device time, corrected by its clock offset).
+    offline: boolean("offline").notNull().default(false),
+    // The device clock looked wrong or moved backwards.
+    timeSuspicious: boolean("time_suspicious").notNull().default(false),
+    // An approved correction changed one of the effective times.
+    isCorrected: boolean("is_corrected").notNull().default(false),
+    // Added by an admin (the person couldn't mark at all).
+    createdBy: integer("id_created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("attendance_user_date_idx").on(table.userId, table.workDate),
+    index("attendance_date_idx").on(table.workDate),
+    index("attendance_status_idx").on(table.status),
+  ],
+);
+
+// A change to a workday's clock-in or clock-out time: requested by the
+// person (forgot to mark the exit) and reviewed by an admin, or made by an
+// admin directly (already approved). The original value stays here forever.
+export const attendanceCorrections = pgTable(
+  "attendance_corrections",
+  {
+    id: integer("id_attendance_correction")
+      .primaryKey()
+      .generatedByDefaultAsIdentity(),
+    uuid: uuid("uuid").notNull().unique(),
+    // attendance_records.uuid (no FK: requested offline, it may sync first).
+    attendanceUuid: uuid("attendance_uuid").notNull(),
+    field: attendanceFieldEnum("field").notNull(),
+    oldValue: timestamp("old_value", { withTimezone: true }),
+    newValue: timestamp("new_value", { withTimezone: true }).notNull(),
+    reason: text("reason").notNull(),
+    requestedBy: integer("id_requested_by")
+      .notNull()
+      .references(() => users.id),
+    status: attendanceCorrectionStatusEnum("status").notNull().default("pending"),
+    reviewedBy: integer("id_reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("attendance_corrections_record_idx").on(table.attendanceUuid),
+    index("attendance_corrections_status_idx").on(table.status),
+  ],
+);
+
 export const saleItems = pgTable("sale_items", {
   id: integer("id_sale_item").primaryKey().generatedByDefaultAsIdentity(),
   saleId: integer("id_sale")
@@ -520,15 +661,21 @@ export const saleItems = pgTable("sale_items", {
   unitPrice: numeric("unit_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
   lineTotal: numeric("line_total", { precision: 10, scale: 2 }).notNull(),
-  // Worker discount applied to this line (snapshot of the product setting)
-  // and the amount taken off lineTotal. A courtesy line is fully given away.
+  // Worker discount applied to this line: soles per unit (snapshot of the
+  // product setting) and the amount taken off lineTotal. discount_percent is
+  // the legacy % from before discounts were in soles.
   discountPercent: numeric("discount_percent", { precision: 5, scale: 2 })
+    .notNull()
+    .default("0"),
+  discountUnitAmount: numeric("discount_unit_amount", { precision: 10, scale: 2 })
     .notNull()
     .default("0"),
   discountAmount: numeric("discount_amount", { precision: 10, scale: 2 })
     .notNull()
     .default("0"),
-  isCourtesy: boolean("is_courtesy").notNull().default(false),
+  // Given away whole: the birthday gift (one unit), or on older sales an
+  // admin-approved courtesy.
+  isGift: boolean("is_courtesy").notNull().default(false),
   // Snapshot of products.price_cost when sold, for the real margin.
   unitCost: numeric("unit_cost", { precision: 12, scale: 4 }),
   captureSource: captureSourceEnum("capture_source"),
@@ -890,8 +1037,8 @@ export const loyaltyLedger = pgTable(
   (table) => [index("loyalty_ledger_worker_idx").on(table.workerId)],
 );
 
-// Append-only trail of sensitive actions (failed PINs, approvals, PIN
-// resets, policy changes). Some are created offline, hence client uuids and
+// Append-only trail of sensitive actions (registrations, approvals, policy
+// changes, failed "Mis puntos" logins…). Some are created offline, hence client uuids and
 // occurred_at (device time) next to created_at (server time).
 export const auditEvents = pgTable(
   "audit_events",
@@ -902,7 +1049,7 @@ export const auditEvents = pgTable(
     type: text("type").notNull(),
     actorId: integer("id_actor").references(() => users.id),
     workerId: integer("id_worker").references(() => workers.id),
-    // sales.uuid, not a foreign key: a courtesy is approved at the till
+    // sales.uuid, not a foreign key: the event may happen at the till
     // before the sale exists on the server.
     saleUuid: uuid("sale_uuid"),
     payload: jsonb("payload")

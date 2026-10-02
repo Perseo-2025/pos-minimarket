@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 export function ProfitPreview({
   priceSale,
   priceCost,
-  workerDiscountPercent,
+  workerDiscountAmount,
 }: {
   priceSale: number;
   priceCost: number | null;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
 }) {
   const margin = productMargin(priceSale, priceCost);
   if (!margin) {
@@ -29,8 +29,8 @@ export function ProfitPreview({
 
   const loses = margin.profit < 0;
   const withDiscount =
-    workerDiscountPercent > 0
-      ? profitWithWorkerDiscount(priceSale, priceCost, workerDiscountPercent)
+    workerDiscountAmount > 0
+      ? profitWithWorkerDiscount(priceSale, priceCost, workerDiscountAmount)
       : null;
 
   return (
@@ -65,7 +65,7 @@ export function ProfitPreview({
               : "text-muted-foreground",
           )}
         >
-          Con el {workerDiscountPercent}% de descuento a trabajadores:{" "}
+          Con {formatSoles(workerDiscountAmount)} de descuento a trabajadores:{" "}
           {withDiscount < 0
             ? `pierdes ${formatSoles(Math.abs(withDiscount))} por unidad`
             : `ganas ${formatSoles(withDiscount)} por unidad`}

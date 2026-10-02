@@ -4,47 +4,53 @@ import { evaluateSaleFlags, type SaleAuditContext } from "./sale-audit";
 
 const PRODUCT = 1;
 const OTHER = 2;
+// 02/10/2026, 10:00 in Lima.
+const SOLD_AT = new Date("2026-10-02T15:00:00Z");
 
 type Line = SaleAuditContext["lines"][number];
 const line = (overrides: Partial<Line> = {}): Line => ({
   productId: PRODUCT,
-  unitPrice: 10,
-  lineTotal: 10,
+  unitPrice: 5,
+  quantity: 1,
+  lineTotal: 5,
   discountAmount: 1,
-  isCourtesy: false,
+  isGift: false,
   ...overrides,
 });
+
+const gift = (overrides: Partial<Line> = {}) =>
+  line({ discountAmount: 0, isGift: true, ...overrides });
 
 function context(overrides: Partial<SaleAuditContext> = {}): SaleAuditContext {
   return {
     lines: [line()],
-    catalog: new Map([[PRODUCT, { price: 10, workerDiscountPercent: 10 }]]),
+    catalog: new Map([
+      [PRODUCT, { price: 5, workerDiscountAmount: 1 }],
+      [OTHER, { price: 12, workerDiscountAmount: 0 }],
+    ]),
     chargedDiscount: 1,
-    courtesyTotal: 0,
-    courtesyApproved: false,
-    worker: { status: "active" },
-    verification: "pin_online",
-    tokenValid: true,
-    policy: { maxDiscountedSalesPerDay: 2, maxDiscountPerMonth: 150 },
-    usage: { discountedSalesToday: 0, discountThisMonth: 0 },
+    giftTotal: 0,
+    soldAt: SOLD_AT,
+    worker: { status: "active", birthDate: "1990-10-02" },
+    policy: {
+      maxDiscountedUnitsPerSale: 3,
+      maxDiscountedSalesPerDay: 2,
+      birthdayGiftMaxAmount: 10,
+    },
+    usage: { discountedSalesToday: 0, giftUsedThisYear: false },
     ...overrides,
   };
 }
 
 describe("evaluateSaleFlags", () => {
-  it("has no flags for a clean, online-verified worker sale", () => {
+  it("has no flags for a clean worker sale", () => {
     assert.deepEqual(evaluateSaleFlags(context()), []);
   });
 
   it("has no flags for a regular customer at catalog price", () => {
     assert.deepEqual(
       evaluateSaleFlags(
-        context({
-          lines: [line({ discountAmount: 0 })],
-          worker: null,
-          chargedDiscount: 0,
-          verification: "none",
-        }),
+        context({ lines: [line({ discountAmount: 0 })], worker: null, chargedDiscount: 0 }),
       ),
       [],
     );
@@ -52,112 +58,151 @@ describe("evaluateSaleFlags", () => {
 
   it("flags a price different from the catalog", () => {
     const flags = evaluateSaleFlags(
-      context({ lines: [line({ unitPrice: 8, discountAmount: 0 })], chargedDiscount: 0 }),
+      context({ lines: [line({ unitPrice: 4, discountAmount: 0 })], chargedDiscount: 0 }),
     );
     assert.ok(flags.includes("PRICE_MISMATCH"));
   });
 
   it("flags an unknown product as a price mismatch", () => {
-    const flags = evaluateSaleFlags(context({ catalog: new Map() }));
+    const flags = evaluateSaleFlags(
+      context({ lines: [line({ productId: 99, discountAmount: 0 })], chargedDiscount: 0 }),
+    );
     assert.ok(flags.includes("PRICE_MISMATCH"));
   });
 
-  it("flags a discount given without a worker", () => {
-    const flags = evaluateSaleFlags(context({ worker: null, verification: "none" }));
-    assert.deepEqual(flags, ["DISCOUNT_MISMATCH"]);
+  it("flags a discount without a worker", () => {
+    const flags = evaluateSaleFlags(context({ worker: null }));
+    assert.ok(flags.includes("DISCOUNT_MISMATCH"));
   });
 
-  it("flags a line discounted above its product's percentage", () => {
+  it("flags more soles off a unit than the product allows", () => {
     const flags = evaluateSaleFlags(
-      context({ lines: [line({ discountAmount: 3 })], chargedDiscount: 3 }),
+      context({ lines: [line({ discountAmount: 2 })], chargedDiscount: 2 }),
     );
     assert.ok(flags.includes("DISCOUNT_MISMATCH"));
   });
 
-  it("checks each line against its own product, not the sale total", () => {
-    // 10% on a product that allows 10%, plus 1.00 on one that allows 0%:
-    // the total (2.00) is below 10% of 20, but the second line is not allowed.
+  it("flags a discount on a product that has none", () => {
     const flags = evaluateSaleFlags(
       context({
-        lines: [line(), line({ productId: OTHER, discountAmount: 1 })],
-        catalog: new Map([
-          [PRODUCT, { price: 10, workerDiscountPercent: 10 }],
-          [OTHER, { price: 10, workerDiscountPercent: 0 }],
-        ]),
-        chargedDiscount: 2,
+        lines: [line({ productId: OTHER, unitPrice: 12, lineTotal: 12, discountAmount: 1 })],
       }),
     );
     assert.ok(flags.includes("DISCOUNT_MISMATCH"));
   });
 
-  it("flags any worker discount when no policy is configured", () => {
+  it("accepts 3 discounted units out of 5", () => {
+    const flags = evaluateSaleFlags(
+      context({
+        lines: [line({ quantity: 5, lineTotal: 25, discountAmount: 3 })],
+        chargedDiscount: 3,
+      }),
+    );
+    assert.deepEqual(flags, []);
+  });
+
+  it("flags more discounted units than allowed per purchase", () => {
+    const flags = evaluateSaleFlags(
+      context({
+        lines: [line({ quantity: 5, lineTotal: 25, discountAmount: 5 })],
+        chargedDiscount: 5,
+      }),
+    );
+    assert.deepEqual(flags, ["UNITS_LIMIT_EXCEEDED"]);
+  });
+
+  it("flags a discount without an active policy", () => {
     const flags = evaluateSaleFlags(context({ policy: null }));
     assert.ok(flags.includes("DISCOUNT_MISMATCH"));
   });
 
-  it("accepts an approved courtesy", () => {
+  it("flags an inactive worker", () => {
     const flags = evaluateSaleFlags(
-      context({
-        lines: [line({ discountAmount: 0, isCourtesy: true })],
-        chargedDiscount: 0,
-        courtesyTotal: 10,
-        courtesyApproved: true,
-        worker: null,
-        verification: "none",
-      }),
+      context({ worker: { status: "suspended", birthDate: null } }),
     );
-    assert.deepEqual(flags, []);
-  });
-
-  it("flags a courtesy without a valid admin approval", () => {
-    const flags = evaluateSaleFlags(
-      context({
-        lines: [line({ discountAmount: 0, isCourtesy: true })],
-        chargedDiscount: 0,
-        courtesyTotal: 10,
-        worker: null,
-        verification: "none",
-      }),
-    );
-    assert.deepEqual(flags, ["COURTESY_NOT_APPROVED"]);
-  });
-
-  it("flags a worker that is not active", () => {
-    const flags = evaluateSaleFlags(context({ worker: { status: "suspended" } }));
     assert.ok(flags.includes("WORKER_NOT_ACTIVE"));
   });
 
-  it("marks offline verification as informative", () => {
-    const flags = evaluateSaleFlags(context({ verification: "pin_offline", tokenValid: false }));
-    assert.deepEqual(flags, ["OFFLINE_VERIFIED"]);
-  });
-
-  it("flags an online verification whose token is invalid", () => {
-    const flags = evaluateSaleFlags(context({ tokenValid: false }));
-    assert.ok(flags.includes("INVALID_VERIFICATION"));
-  });
-
-  it("flags a worker sale with no PIN verification at all", () => {
-    const flags = evaluateSaleFlags(context({ verification: "none", tokenValid: false }));
-    assert.ok(flags.includes("INVALID_VERIFICATION"));
-  });
-
-  it("flags the daily and monthly caps", () => {
+  it("flags a discounted purchase over the daily cap", () => {
     const flags = evaluateSaleFlags(
-      context({ usage: { discountedSalesToday: 2, discountThisMonth: 149.5 } }),
+      context({ usage: { discountedSalesToday: 2, giftUsedThisYear: false } }),
     );
     assert.ok(flags.includes("DAILY_LIMIT_EXCEEDED"));
-    assert.ok(flags.includes("MONTHLY_LIMIT_EXCEEDED"));
   });
 
-  it("does not apply caps to worker sales without discount", () => {
+  it("does not apply the daily cap to a sale without discount", () => {
     const flags = evaluateSaleFlags(
       context({
         lines: [line({ discountAmount: 0 })],
         chargedDiscount: 0,
-        usage: { discountedSalesToday: 5, discountThisMonth: 500 },
+        usage: { discountedSalesToday: 5, giftUsedThisYear: false },
       }),
     );
     assert.deepEqual(flags, []);
+  });
+
+  it("accepts the birthday gift on the birthday", () => {
+    const flags = evaluateSaleFlags(
+      context({ lines: [gift()], chargedDiscount: 0, giftTotal: 5 }),
+    );
+    assert.deepEqual(flags, []);
+  });
+
+  it("flags a gift on another day", () => {
+    const flags = evaluateSaleFlags(
+      context({
+        lines: [gift()],
+        chargedDiscount: 0,
+        giftTotal: 5,
+        worker: { status: "active", birthDate: "1990-05-01" },
+      }),
+    );
+    assert.deepEqual(flags, ["GIFT_NOT_BIRTHDAY"]);
+  });
+
+  it("flags a gift without a worker", () => {
+    const flags = evaluateSaleFlags(
+      context({ lines: [gift()], chargedDiscount: 0, giftTotal: 5, worker: null }),
+    );
+    assert.deepEqual(flags, ["GIFT_NOT_BIRTHDAY"]);
+  });
+
+  it("flags a second gift in the same year", () => {
+    const flags = evaluateSaleFlags(
+      context({
+        lines: [gift()],
+        chargedDiscount: 0,
+        giftTotal: 5,
+        usage: { discountedSalesToday: 0, giftUsedThisYear: true },
+      }),
+    );
+    assert.deepEqual(flags, ["GIFT_ALREADY_USED"]);
+  });
+
+  it("flags a gift above the limit or of several units", () => {
+    const expensive = evaluateSaleFlags(
+      context({
+        lines: [gift({ productId: OTHER, unitPrice: 12, lineTotal: 12 })],
+        chargedDiscount: 0,
+        giftTotal: 12,
+      }),
+    );
+    assert.deepEqual(expensive, ["GIFT_OVER_LIMIT"]);
+
+    const twoUnits = evaluateSaleFlags(
+      context({
+        lines: [gift({ quantity: 2, lineTotal: 10 })],
+        chargedDiscount: 0,
+        giftTotal: 10,
+      }),
+    );
+    assert.deepEqual(twoUnits, ["GIFT_OVER_LIMIT"]);
+  });
+
+  it("flags a discount on the gift line", () => {
+    const flags = evaluateSaleFlags(
+      context({ lines: [gift({ discountAmount: 1 })], chargedDiscount: 1, giftTotal: 5 }),
+    );
+    assert.ok(flags.includes("DISCOUNT_MISMATCH"));
   });
 });

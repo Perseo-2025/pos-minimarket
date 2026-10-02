@@ -32,7 +32,7 @@ type Product = {
   priceSale: string;
   priceCost: string | null;
   tracksExpiry: boolean | null;
-  workerDiscountPercent: number;
+  workerDiscountAmount: number;
   // Units across all locations; null = stock not tracked yet (no count).
   stock: number | null;
   presentations: Presentation[];
@@ -130,9 +130,9 @@ export function ProductTable({
           </TableCell>
           <TableCell className="text-right tabular-nums">
             <div className="font-medium">{formatSoles(product.priceSale)}</div>
-            {product.workerDiscountPercent > 0 && (
+            {product.workerDiscountAmount > 0 && (
               <div className="text-xs text-emerald-700 dark:text-emerald-400">
-                Trabajador −{product.workerDiscountPercent}%
+                Trabajador −{formatSoles(product.workerDiscountAmount)}
               </div>
             )}
           </TableCell>

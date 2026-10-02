@@ -11,7 +11,7 @@ const productImageUrl = z
     "Imagen inválida",
   );
 
-export const productCreateSchema = z.object({
+const productFields = z.object({
   name: z.string().min(1, "El nombre es obligatorio"),
   // The unit's code, scanned at the till.
   barcode: barcodeSchema,
@@ -29,21 +29,32 @@ export const productCreateSchema = z.object({
   ),
   // null = same as the category (most products).
   tracksExpiry: z.boolean().nullable().default(null),
-  // 100% is not a discount but a courtesy: it is approved by an admin at
-  // the till, sale by sale, never set on the product.
-  workerDiscountPercent: z.coerce
-    .number()
-    .int("El descuento debe ser un número entero")
+  // Soles an airport worker gets off each unit. Always below the price: a
+  // worker never takes a product for free (only the birthday gift).
+  workerDiscountAmount: z.coerce
+    .number("El descuento debe ser un número")
     .min(0, "El descuento no puede ser negativo")
-    .max(99, "Máximo 99%. Para regalar un producto usa Cortesía en caja")
     .default(0),
   // null removes the image; omitted leaves it unchanged on update.
   imageUrl: productImageUrl.nullable().optional(),
 });
 
-export const productUpdateSchema = productCreateSchema.extend({
-  id: idSchema,
-});
+function discountBelowPrice(data: { priceSale: number; workerDiscountAmount: number }) {
+  return data.workerDiscountAmount < data.priceSale;
+}
+const discountBelowPriceIssue = {
+  message: "El descuento debe ser menor que el precio",
+  path: ["workerDiscountAmount"],
+};
+
+export const productCreateSchema = productFields.refine(
+  discountBelowPrice,
+  discountBelowPriceIssue,
+);
+
+export const productUpdateSchema = productFields
+  .extend({ id: idSchema })
+  .refine(discountBelowPrice, discountBelowPriceIssue);
 
 export type ProductCreateInput = z.infer<typeof productCreateSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateSchema>;

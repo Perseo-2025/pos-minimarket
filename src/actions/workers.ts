@@ -7,6 +7,7 @@ import {
   getWorkerDetailUseCase,
   refreshWorkerNameUseCase,
   setWorkerStatusUseCase,
+  updateWorkerBirthDateUseCase,
   type WorkerAction,
 } from "@/application/use-cases/workers/manage-workers";
 import { idSchema } from "@/application/validation/id";
@@ -70,6 +71,14 @@ export async function getWorkerDetail(workerId: number) {
   });
 }
 
+export async function updateWorkerBirthDate(workerId: number, birthDate: string) {
+  return runAction(async () => {
+    const admin = await requireAdmin();
+    await updateWorkerBirthDateUseCase(workerDeps, { workerId, birthDate }, admin.id);
+    revalidateWorkerViews();
+  });
+}
+
 export async function updateDiscountPolicy(input: unknown) {
   return runAction(async () => {
     const admin = await requireAdmin();
@@ -78,8 +87,8 @@ export async function updateDiscountPolicy(input: unknown) {
   });
 }
 
-// Public: used by the "Mis puntos" page. Authenticated by DNI + PIN, with the
-// same lockout as the till.
+// Public: used by the "Mis puntos" page. Authenticated by DNI + birth date,
+// with a lockout after several wrong attempts.
 export async function getMyPoints(input: unknown) {
   return runDataAction(() => getWorkerStatementUseCase(workerDeps, input));
 }

@@ -5,10 +5,10 @@ export type CartItem = {
   name: string;
   unitPrice: number;
   quantity: number;
-  // Captured when added: what an identified worker gets off this product.
-  workerDiscountPercent: number;
-  // Given away; needs an admin's approval before checkout.
-  isCourtesy: boolean;
+  // Captured when added: soles an identified worker gets off each unit.
+  workerDiscountAmount: number;
+  // One unit is the worker's birthday gift.
+  isGift: boolean;
   // Scanned with the reader, or picked on screen (any tap makes it manual).
   captureSource: CaptureSource;
 };

@@ -1,9 +1,21 @@
 "use client";
 
-import { CloudOffIcon, KeyRoundIcon, RefreshCwIcon, UserPlusIcon } from "lucide-react";
+import {
+  CakeIcon,
+  CloudOffIcon,
+  KeyRoundIcon,
+  RefreshCwIcon,
+  UserPlusIcon,
+} from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { getWorkerDetail, refreshWorkerName, setWorkerStatus } from "@/actions/workers";
+import {
+  getWorkerDetail,
+  refreshWorkerName,
+  setWorkerStatus,
+  updateWorkerBirthDate,
+} from "@/actions/workers";
+import { BirthDateInput, formatBirthDate } from "@/components/birth-date-input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +49,7 @@ import type {
   WorkerPendingReason,
   WorkerStatus,
 } from "@/domain/entities/worker";
+import { isBirthdayAt } from "@/domain/services/birthday";
 import { usePagination } from "@/hooks/use-pagination";
 import { formatSoles } from "@/lib/money";
 import { DataTable, ID_COLUMN, IdCell } from "../data-table";
@@ -49,6 +62,8 @@ export type WorkerRow = {
   fullName: string;
   nameSource: WorkerNameSource;
   company: string;
+  // YYYY-MM-DD; null on workers registered before it was asked.
+  birthDate: string | null;
   status: WorkerStatus;
   pendingReason: WorkerPendingReason | null;
   pointsBalance: number;
@@ -62,6 +77,7 @@ const COLUMNS = [
   ID_COLUMN,
   { label: "Trabajador" },
   { label: "Empresa" },
+  { label: "Cumpleaños" },
   { label: "Estado" },
   { label: "Registrado por" },
   { label: "Puntos", className: "text-right" },
@@ -164,6 +180,9 @@ export function WorkerTable({
             </TableCell>
             <TableCell>{worker.company}</TableCell>
             <TableCell>
+              <BirthdayCell birthDate={worker.birthDate} />
+            </TableCell>
+            <TableCell>
               <div className="flex flex-col items-start gap-1">
                 <WorkerStatusBadge status={worker.status} />
                 {worker.pendingReason && (
@@ -203,7 +222,7 @@ export function WorkerTable({
                     <ConfirmButton
                       label="Rechazar"
                       title={`¿Rechazar a ${worker.fullName}?`}
-                      description="No recibirá descuento. Usa esta opción si no es trabajador del aeropuerto o si no reconoces el cambio de clave."
+                      description="No recibirá descuento. Usa esta opción si no es trabajador del aeropuerto o si sus datos no son correctos."
                       confirmLabel="Rechazar"
                       destructive
                       disabled={isPending}
@@ -277,6 +296,13 @@ export function WorkerTable({
                   </div>
                 </dl>
 
+                <BirthDateEditor
+                  key={selected.id}
+                  workerId={selected.id}
+                  birthDate={selected.birthDate}
+                  onSaved={(birthDate) => setSelected({ ...selected, birthDate })}
+                />
+
                 <div>
                   <h3 className="mb-2 text-sm font-semibold">Últimas compras</h3>
                   {!detail ? (
@@ -296,7 +322,10 @@ export function WorkerTable({
                           <li key={purchase.saleId} className="space-y-1 p-3 text-sm">
                             <div className="flex justify-between gap-2">
                               <span className="text-muted-foreground">
-                                {dateTimeFormat.format(new Date(purchase.clientCreatedAt))}
+                                <span className="font-mono font-medium text-foreground">
+                                  Orden #{purchase.saleId}
+                                </span>{" "}
+                                · {dateTimeFormat.format(new Date(purchase.clientCreatedAt))}
                               </span>
                               <span className="font-semibold tabular-nums">
                                 {formatSoles(purchase.total)}
@@ -307,7 +336,9 @@ export function WorkerTable({
                               <span className="tabular-nums">
                                 {purchase.discountTotal > 0
                                   ? `−${formatSoles(purchase.discountTotal)}`
-                                  : "Sin descuento"}{" "}
+                                  : "Sin descuento"}
+                                {purchase.giftTotal > 0 &&
+                                  ` · regalo 🎂 ${formatSoles(purchase.giftTotal)}`}{" "}
                                 · +{purchase.pointsEarned} pts
                               </span>
                             </div>
@@ -386,5 +417,83 @@ function ConfirmButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function BirthdayCell({ birthDate }: { birthDate: string | null }) {
+  if (!birthDate) {
+    return (
+      <Badge
+        variant="outline"
+        className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+      >
+        Falta la fecha
+      </Badge>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-1 text-sm tabular-nums">
+      {formatBirthDate(birthDate).slice(0, 5)}
+      {isBirthdayAt(birthDate, new Date()) && (
+        <Badge className="bg-brand-orange text-white">
+          <CakeIcon />
+          Hoy
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+// Workers registered before the birth date was asked have none: the admin
+// fills it in here (and fixes typos), or they get no birthday gift.
+function BirthDateEditor({
+  workerId,
+  birthDate,
+  onSaved,
+}: {
+  workerId: number;
+  birthDate: string | null;
+  onSaved: (birthDate: string) => void;
+}) {
+  const [value, setValue] = useState<string | null>(birthDate);
+  const [isPending, startTransition] = useTransition();
+  const changed = value !== null && value !== birthDate;
+
+  function save() {
+    if (!value) return;
+    startTransition(async () => {
+      const result = await updateWorkerBirthDate(workerId, value);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Fecha de nacimiento guardada");
+      onSaved(value);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border p-3">
+      <label htmlFor="birth-date-edit" className="flex items-center gap-1.5 text-sm font-semibold">
+        <CakeIcon className="size-4 text-brand-orange" aria-hidden />
+        Fecha de nacimiento
+      </label>
+      <div className="flex gap-2">
+        <BirthDateInput
+          id="birth-date-edit"
+          defaultValue={birthDate}
+          onChange={setValue}
+          className="tabular-nums tracking-wider"
+        />
+        <Button disabled={!changed || isPending} onClick={save}>
+          {isPending ? "Guardando…" : "Guardar"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {birthDate
+          ? "El día de su cumpleaños la caja ofrece su regalo."
+          : "Sin fecha no recibe regalo de cumpleaños. Cópiala de su DNI."}
+      </p>
+    </div>
   );
 }

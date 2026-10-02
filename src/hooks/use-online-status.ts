@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { countPendingAttendanceOps } from "@/infrastructure/offline/attendance-ops";
 import { countPendingSales } from "@/infrastructure/offline/queue";
 import { countPendingWorkerOps } from "@/infrastructure/offline/worker-ops";
 import {
@@ -41,10 +42,13 @@ export function useOnlineStatus() {
     startSyncEngine();
 
     const refreshPendingCount = () => {
-      // Sales plus worker registrations/PIN changes waiting to sync.
-      void Promise.all([countPendingSales(), countPendingWorkerOps()]).then(
-        ([sales, ops]) => setPendingCount(sales + ops),
-      );
+      // Sales, worker registrations and attendance marks
+      // waiting to sync.
+      void Promise.all([
+        countPendingSales(),
+        countPendingWorkerOps(),
+        countPendingAttendanceOps(),
+      ]).then(([sales, ops, marks]) => setPendingCount(sales + ops + marks));
     };
     refreshPendingCount();
 
