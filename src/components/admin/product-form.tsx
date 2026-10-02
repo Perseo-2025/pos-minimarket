@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -24,24 +25,36 @@ import {
 } from "@/components/ui/select";
 import { CategoryGlyph } from "@/components/pos/category-glyph";
 import { ProductImageField } from "./product-image-field";
+import { ProfitPreview } from "./profit-preview";
 import { WorkerDiscountField } from "./worker-discount-field";
 
 type Product = {
-  id: string;
+  id: number;
   name: string;
+  barcode: string | null;
   description: string | null;
-  categoryId: string;
+  categoryId: number;
   priceSale: string;
+  // Precio de compra; null = not entered yet.
+  priceCost: string | null;
+  // Expiry control set on the product; null = follow the category.
+  tracksExpiry: boolean | null;
   workerDiscountPercent: number;
   imageUrl: string | null;
 };
 
 export type CategoryOption = {
-  id: string;
+  id: number;
   name: string;
   icon: string | null;
   isActive: boolean;
+  tracksExpiry: boolean;
 };
+
+const EXPIRY_CHOICES = { inherit: null, yes: true, no: false } as const;
+type ExpiryChoice = keyof typeof EXPIRY_CHOICES;
+const toExpiryChoice = (value: boolean | null | undefined): ExpiryChoice =>
+  value === true ? "yes" : value === false ? "no" : "inherit";
 
 // Fire-and-forget: an upload that never made it into a product. keepalive
 // lets the request finish even if the page is navigating away.
@@ -63,7 +76,7 @@ export function ProductForm({
   product?: Product;
   categories: CategoryOption[];
   // Preselected for new products (e.g. when the list is filtered by one).
-  defaultCategoryId?: string;
+  defaultCategoryId?: number;
   trigger: React.ReactNode;
 }) {
   const savedImageUrl = product?.imageUrl ?? null;
@@ -71,6 +84,7 @@ export function ProductForm({
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [name, setName] = useState(product?.name ?? "");
+  const [barcode, setBarcode] = useState(product?.barcode ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   // Active categories, plus the product's current one if it was deactivated
   // meanwhile, so editing other fields doesn't force a recategorization.
@@ -81,10 +95,14 @@ export function ProductForm({
     product?.categoryId ??
     options.find((c) => c.id === defaultCategoryId)?.id ??
     options[0]?.id ??
-    "";
-  const [categoryId, setCategoryId] = useState(initialCategoryId);
+    null;
+  const [categoryId, setCategoryId] = useState<number | null>(initialCategoryId);
   const [error, setError] = useState<string | null>(null);
   const [priceSale, setPriceSale] = useState(product?.priceSale ?? "");
+  const [priceCost, setPriceCost] = useState(product?.priceCost ?? "");
+  const [expiry, setExpiry] = useState<ExpiryChoice>(
+    toExpiryChoice(product?.tracksExpiry),
+  );
   const [workerDiscount, setWorkerDiscount] = useState(
     product?.workerDiscountPercent ?? 0,
   );
@@ -95,10 +113,13 @@ export function ProductForm({
   // cancelled would reappear the next time the dialog opens.
   function resetForm() {
     setName(product?.name ?? "");
+    setBarcode(product?.barcode ?? "");
     setDescription(product?.description ?? "");
     setCategoryId(initialCategoryId);
     setError(null);
     setPriceSale(product?.priceSale ?? "");
+    setPriceCost(product?.priceCost ?? "");
+    setExpiry(toExpiryChoice(product?.tracksExpiry));
     setWorkerDiscount(product?.workerDiscountPercent ?? 0);
     setImageUrl(savedImageUrl);
   }
@@ -130,9 +151,12 @@ export function ProductForm({
     startTransition(async () => {
       const input = {
         name,
+        barcode,
         description,
         categoryId,
         priceSale,
+        priceCost,
+        tracksExpiry: EXPIRY_CHOICES[expiry],
         workerDiscountPercent: workerDiscount,
         imageUrl,
       };
@@ -183,6 +207,26 @@ export function ProductForm({
             />
           </div>
           <div className="flex flex-col gap-2">
+            <Label htmlFor="barcode">Código de barras de la unidad</Label>
+            <Input
+              id="barcode"
+              inputMode="numeric"
+              placeholder="Toca aquí y dispara el lector"
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              // The reader ends every code with Enter: it fills the field,
+              // it must not save the half-filled form.
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.preventDefault();
+              }}
+              className="font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              El de la botella o el paquete suelto. El de la caja o display va en
+              Presentaciones.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
             <Label htmlFor="description">Descripción</Label>
             <Input
               id="description"
@@ -205,7 +249,7 @@ export function ProductForm({
                 value={categoryId}
                 // Lets the trigger show the name instead of the raw id.
                 items={options.map((c) => ({ value: c.id, label: c.name }))}
-                onValueChange={(value) => value && setCategoryId(value)}
+                onValueChange={(value) => value && setCategoryId(value as number)}
               >
                 <SelectTrigger id="category" className="w-full">
                   <SelectValue />
@@ -222,17 +266,79 @@ export function ProductForm({
               </Select>
             )}
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="priceCost">Precio de compra (S/)</Label>
+              <Input
+                id="priceCost"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="Opcional"
+                value={priceCost}
+                onChange={(e) => setPriceCost(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Lo que te cuesta una unidad.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="priceSale">Precio de venta (S/)</Label>
+              <Input
+                id="priceSale"
+                type="number"
+                step="0.10"
+                min="0"
+                value={priceSale}
+                onChange={(e) => setPriceSale(e.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Lo que cobra la caja.
+              </p>
+            </div>
+          </div>
+          <ProfitPreview
+            priceSale={Number(priceSale) || 0}
+            priceCost={priceCost === "" ? null : Number(priceCost)}
+            workerDiscountPercent={workerDiscount}
+          />
           <div className="flex flex-col gap-2">
-            <Label htmlFor="priceSale">Precio de venta (S/)</Label>
-            <Input
-              id="priceSale"
-              type="number"
-              step="0.10"
-              min="0"
-              value={priceSale}
-              onChange={(e) => setPriceSale(e.target.value)}
-              required
-            />
+            <Label id="product-expiry-label">Fecha de vencimiento</Label>
+            <ToggleGroup
+              aria-labelledby="product-expiry-label"
+              value={[expiry]}
+              onValueChange={(next) => {
+                const [choice] = next as ExpiryChoice[];
+                if (choice) setExpiry(choice);
+              }}
+              variant="outline"
+              spacing={1}
+              className="grid w-full grid-cols-3"
+            >
+              {(
+                [
+                  [
+                    "inherit",
+                    `Como la categoría (${
+                      categories.find((c) => c.id === categoryId)?.tracksExpiry
+                        ? "vence"
+                        : "no vence"
+                    })`,
+                  ],
+                  ["yes", "Sí vence"],
+                  ["no", "No vence"],
+                ] as const
+              ).map(([value, label]) => (
+                <ToggleGroupItem
+                  key={value}
+                  value={value}
+                  className="h-auto py-1.5 text-xs whitespace-normal aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+                >
+                  {label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
           <div className="flex flex-col gap-2">
             <Label id="worker-discount-label">Descuento para trabajadores</Label>

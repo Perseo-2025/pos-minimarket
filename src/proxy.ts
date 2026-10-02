@@ -1,27 +1,31 @@
 import { NextResponse } from "next/server";
+import { can, homePath, type Permission } from "@/domain/entities/user";
 import { auth } from "@/infrastructure/auth";
+
+// Which permission each area needs (see ROLE_PERMISSIONS: the admin has all).
+function requiredPermission(pathname: string): Permission | null {
+  if (pathname.startsWith("/admin")) return "manage";
+  if (pathname.startsWith("/pos")) return "sell";
+  if (pathname.startsWith("/almacen")) return "stock";
+  return null;
+}
 
 export default auth((req) => {
   const { nextUrl } = req;
-  const session = req.auth;
-  const role = session?.user?.role;
+  const user = req.auth?.user;
+  const required = requiredPermission(nextUrl.pathname);
 
-  const isLoginPage = nextUrl.pathname === "/login";
-  const isAdminArea = nextUrl.pathname.startsWith("/admin");
-  const isCashierArea = nextUrl.pathname.startsWith("/pos");
-
-  if (!session && (isAdminArea || isCashierArea)) {
+  if (!user && required) {
     return NextResponse.redirect(new URL("/login", nextUrl));
   }
 
-  if (session && isLoginPage) {
-    return NextResponse.redirect(
-      new URL(role === "admin" ? "/admin" : "/pos", nextUrl),
-    );
+  if (user && nextUrl.pathname === "/login") {
+    return NextResponse.redirect(new URL(homePath(user.role), nextUrl));
   }
 
-  if (session && role === "cashier" && isAdminArea) {
-    return NextResponse.redirect(new URL("/pos", nextUrl));
+  // Wrong area for this role: back to its own screen.
+  if (user && required && !can(user.role, required)) {
+    return NextResponse.redirect(new URL(homePath(user.role), nextUrl));
   }
 
   return NextResponse.next();

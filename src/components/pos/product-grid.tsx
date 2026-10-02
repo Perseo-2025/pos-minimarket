@@ -5,7 +5,7 @@ import { formatSoles } from "@/lib/money";
 import { ProductImagePlaceholder } from "./product-image-placeholder";
 
 type Product = {
-  id: string;
+  id: number;
   name: string;
   priceSale: number;
   workerDiscountPercent: number;

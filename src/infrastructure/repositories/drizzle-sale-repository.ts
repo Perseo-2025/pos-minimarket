@@ -1,14 +1,16 @@
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { AuditFlag } from "@/domain/entities/audit";
 import type { Sale, SaleRecord } from "@/domain/entities/sale";
 import type { SaleRepository } from "@/domain/repositories/sale-repository";
 import { db } from "@/infrastructure/db/client";
 import {
   loyaltyLedger,
+  products,
   saleItems,
   sales,
   workers,
 } from "@/infrastructure/db/schema";
+import { moveStockForSale } from "./stock-ledger";
 
 type SaleRow = typeof sales.$inferSelect & {
   cashier: { name: string } | null;
@@ -20,6 +22,7 @@ type SaleRow = typeof sales.$inferSelect & {
 function toSale(row: SaleRow): Sale {
   return {
     id: row.id,
+    uuid: row.uuid,
     cashierId: row.cashierId,
     cashierName: row.cashier?.name,
     status: row.status,
@@ -50,6 +53,7 @@ function toSale(row: SaleRow): Sale {
       discountPercent: Number(item.discountPercent),
       discountAmount: Number(item.discountAmount),
       isCourtesy: item.isCourtesy,
+      captureSource: item.captureSource,
     })),
   };
 }
@@ -68,7 +72,8 @@ export class DrizzleSaleRepository implements SaleRepository {
       const [row] = await tx
         .insert(sales)
         .values({
-          id: record.id,
+          uuid: record.uuid,
+          shiftUuid: record.shiftUuid,
           cashierId: record.cashierId,
           paymentType: record.paymentType,
           subtotal: record.subtotal.toFixed(2),
@@ -85,16 +90,32 @@ export class DrizzleSaleRepository implements SaleRepository {
           clientCreatedAt: new Date(record.clientCreatedAt),
           syncedAt: new Date(),
         })
-        .onConflictDoNothing({ target: sales.id })
+        .onConflictDoNothing({ target: sales.uuid })
         .returning({ id: sales.id });
 
-      // Already synced previously (retry) — skip items and points too.
-      if (!row) return false;
+      // Already synced previously (retry) — skip items, points and stock too.
+      if (!row) return null;
+      const saleId = row.id;
+
+      const catalogRows = await tx
+        .select({
+          id: products.id,
+          name: products.name,
+          trackStock: products.trackStock,
+          priceCost: products.priceCost,
+        })
+        .from(products)
+        .where(
+          inArray(
+            products.id,
+            record.items.map((item) => item.productId),
+          ),
+        );
+      const catalog = new Map(catalogRows.map((p) => [p.id, p]));
 
       await tx.insert(saleItems).values(
         record.items.map((item) => ({
-          id: item.id,
-          saleId: record.id,
+          saleId,
           productId: item.productId,
           productName: item.productName,
           unitPrice: item.unitPrice.toFixed(2),
@@ -103,13 +124,17 @@ export class DrizzleSaleRepository implements SaleRepository {
           discountPercent: (item.discountPercent ?? 0).toFixed(2),
           discountAmount: (item.discountAmount ?? 0).toFixed(2),
           isCourtesy: item.isCourtesy ?? false,
+          unitCost: catalog.get(item.productId)?.priceCost ?? null,
+          captureSource: item.captureSource ?? null,
         })),
       );
+
+      await moveStockForSale(tx, record, saleId, catalog);
 
       if (record.workerId && record.pointsEarned > 0) {
         await tx.insert(loyaltyLedger).values({
           workerId: record.workerId,
-          saleId: record.id,
+          saleId,
           points: record.pointsEarned,
           type: "earn",
         });
@@ -121,17 +146,30 @@ export class DrizzleSaleRepository implements SaleRepository {
           .where(eq(workers.id, record.workerId));
       }
 
-      return true;
+      return saleId;
     });
 
-    return { id: record.id, total: record.total, inserted };
+    if (inserted !== null) {
+      return { id: inserted, uuid: record.uuid, total: record.total, inserted: true };
+    }
+    const [existing] = await db
+      .select({ id: sales.id, total: sales.total })
+      .from(sales)
+      .where(eq(sales.uuid, record.uuid))
+      .limit(1);
+    return {
+      id: existing.id,
+      uuid: record.uuid,
+      total: Number(existing.total),
+      inserted: false,
+    };
   }
 
-  async exists(id: string) {
+  async existsByUuid(uuid: string) {
     const [row] = await db
       .select({ id: sales.id })
       .from(sales)
-      .where(eq(sales.id, id))
+      .where(eq(sales.uuid, uuid))
       .limit(1);
     return row !== undefined;
   }
@@ -149,7 +187,7 @@ export class DrizzleSaleRepository implements SaleRepository {
     return rows.map(toSale);
   }
 
-  async findById(id: string): Promise<Sale | null> {
+  async findById(id: number): Promise<Sale | null> {
     const row = await db.query.sales.findFirst({
       where: eq(sales.id, id),
       with: withRelations,

@@ -22,6 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  USER_ROLE_DESCRIPTIONS,
+  USER_ROLE_LABELS,
+  USER_ROLES,
+  type UserRole,
+} from "@/domain/entities/user";
 
 export function UserForm() {
   const [open, setOpen] = useState(false);
@@ -29,7 +35,7 @@ export function UserForm() {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "cashier">("cashier");
+  const [role, setRole] = useState<UserRole>("cashier");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -99,16 +105,23 @@ export function UserForm() {
             <Label htmlFor="role">Rol</Label>
             <Select
               value={role}
-              onValueChange={(v) => setRole(v as "admin" | "cashier")}
+              onValueChange={(v) => v && setRole(v as UserRole)}
+              items={USER_ROLES.map((r) => ({ value: r, label: USER_ROLE_LABELS[r] }))}
             >
               <SelectTrigger id="role">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="cashier">Cajero</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
+                {USER_ROLES.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {USER_ROLE_LABELS[r]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              {USER_ROLE_DESCRIPTIONS[role]}
+            </p>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={isPending}>

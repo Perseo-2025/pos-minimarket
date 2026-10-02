@@ -15,6 +15,17 @@ export type DataTableColumn = {
   className?: string;
 };
 
+// Every admin table starts with the record's numeric id (id_<entity>).
+export const ID_COLUMN: DataTableColumn = { label: "ID", className: "w-16" };
+
+export function IdCell({ id }: { id: number }) {
+  return (
+    <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">
+      {id}
+    </TableCell>
+  );
+}
+
 // Shared chrome for every admin table: bordered card, muted header, empty
 // state and a footer slot (pagination). Rows are rendered by the caller.
 export function DataTable({

@@ -7,9 +7,9 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 
 type TokenPayload = {
-  s: string; // sale id
-  c: string; // cashier id
-  a: string; // approving admin id
+  s: string; // sale uuid (the sale has no numeric id until it syncs)
+  c: number; // cashier id
+  a: number; // approving admin id
   amt: string; // courtesy amount, fixed to cents
   exp: number;
   n: string;
@@ -29,13 +29,13 @@ function sign(data: string) {
 }
 
 export function issueCourtesyToken(input: {
-  saleId: string;
-  cashierId: string;
-  adminId: string;
+  saleUuid: string;
+  cashierId: number;
+  adminId: number;
   amount: number;
 }) {
   const payload: TokenPayload = {
-    s: input.saleId,
+    s: input.saleUuid,
     c: input.cashierId,
     a: input.adminId,
     amt: input.amount.toFixed(2),
@@ -50,8 +50,8 @@ export function issueCourtesyToken(input: {
 // forged, expired, or doesn't match this sale/cashier/amount.
 export function verifyCourtesyToken(
   token: string | undefined,
-  expected: { saleId: string; cashierId: string; amount: number; at: Date },
-): string | null {
+  expected: { saleUuid: string; cashierId: number; amount: number; at: Date },
+): number | null {
   if (!token) return null;
 
   const [data, signature] = token.split(".");
@@ -71,7 +71,7 @@ export function verifyCourtesyToken(
       Buffer.from(data, "base64url").toString("utf8"),
     ) as TokenPayload;
     const matches =
-      payload.s === expected.saleId &&
+      payload.s === expected.saleUuid &&
       payload.c === expected.cashierId &&
       payload.amt === expected.amount.toFixed(2) &&
       expected.at.getTime() <= payload.exp;

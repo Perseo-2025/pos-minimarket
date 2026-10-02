@@ -43,7 +43,7 @@ import { PinPad } from "./pin-pad";
 
 // The worker identified at the till, attached to the current sale only.
 export type AppliedWorker = {
-  id: string;
+  id: number;
   dni: string;
   fullName: string;
   company: string;
@@ -346,7 +346,7 @@ export function WorkerDiscountDialog({
         dni,
         label: `Registro de ${dni}`,
         data: {
-          id: crypto.randomUUID(),
+          uuid: crypto.randomUUID(),
           dni,
           fullName: fullName.trim(),
           nameSource: nameLookup === "api" ? "api" : "manual",
@@ -388,7 +388,7 @@ export function WorkerDiscountDialog({
         op: "pin_reset",
         label: `Cambio de clave de ${worker.dni}`,
         data: {
-          id: crypto.randomUUID(),
+          uuid: crypto.randomUUID(),
           workerId: worker.id,
           pinHash,
           occurredAt: new Date().toISOString(),

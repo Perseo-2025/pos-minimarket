@@ -20,6 +20,7 @@ type WorkerRow = typeof workers.$inferSelect & {
 function toWorker(row: WorkerRow): WorkerWithPin {
   return {
     id: row.id,
+    uuid: row.uuid,
     dni: row.dni,
     fullName: row.fullName,
     nameSource: row.nameSource,
@@ -46,7 +47,7 @@ function selectWorkers() {
 const discounted = gt(sales.discountTotal, "0");
 
 export class DrizzleWorkerRepository implements WorkerRepository {
-  async findById(id: string) {
+  async findById(id: number) {
     const [row] = await selectWorkers().where(eq(workers.id, id)).limit(1);
     return row ? toWorker({ ...row.worker, registeredByName: row.registeredByName }) : null;
   }
@@ -86,7 +87,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
     const rows = await db
       .insert(workers)
       .values({
-        id: data.id,
+        uuid: data.uuid,
         dni: data.dni,
         fullName: data.fullName,
         nameSource: data.nameSource,
@@ -96,12 +97,12 @@ export class DrizzleWorkerRepository implements WorkerRepository {
         pendingReason: "new",
         registeredBy: data.registeredById,
       })
-      .onConflictDoNothing({ target: workers.id })
+      .onConflictDoNothing({ target: workers.uuid })
       .returning({ id: workers.id });
-    return rows.length > 0;
+    return rows[0]?.id ?? null;
   }
 
-  async replacePin(id: string, pinHash: string) {
+  async replacePin(id: number, pinHash: string) {
     await db
       .update(workers)
       .set({
@@ -114,7 +115,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       .where(eq(workers.id, id));
   }
 
-  async setStatus(id: string, status: WorkerStatus, actorId: string) {
+  async setStatus(id: number, status: WorkerStatus, actorId: number) {
     await db
       .update(workers)
       .set({
@@ -127,14 +128,14 @@ export class DrizzleWorkerRepository implements WorkerRepository {
       .where(eq(workers.id, id));
   }
 
-  async updateName(id: string, fullName: string, nameSource: WorkerNameSource) {
+  async updateName(id: number, fullName: string, nameSource: WorkerNameSource) {
     await db
       .update(workers)
       .set({ fullName, nameSource, updatedAt: new Date() })
       .where(eq(workers.id, id));
   }
 
-  async discountUsage(workerId: string, dayStart: Date, monthStart: Date) {
+  async discountUsage(workerId: number, dayStart: Date, monthStart: Date) {
     const [row] = await db
       .select({
         today: sql<number>`count(*) filter (where ${sales.clientCreatedAt} >= ${dayStart.toISOString()}::timestamptz)`.mapWith(
@@ -200,7 +201,7 @@ export class DrizzleWorkerRepository implements WorkerRepository {
     }));
   }
 
-  async purchaseHistory(workerId: string, limit: number) {
+  async purchaseHistory(workerId: number, limit: number) {
     const rows = await db
       .select({
         saleId: sales.id,

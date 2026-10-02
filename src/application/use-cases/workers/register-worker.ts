@@ -17,7 +17,7 @@ export async function registerWorkerUseCase(
     pinHasher: PinHasher;
   },
   input: unknown,
-  actorId: string,
+  actorId: number,
   lookupTimeoutMs: number,
 ) {
   const data = workerRegisterSchema.parse(input);
@@ -29,7 +29,7 @@ export async function registerWorkerUseCase(
   const existing = await deps.workers.findByDni(data.dni);
   if (existing) {
     // Same registration synced twice (offline retry) — already done.
-    if (existing.id === data.id) return { id: existing.id, created: false };
+    if (existing.uuid === data.uuid) return { id: existing.id, created: false };
     throw new WorkerAlreadyExistsError(
       `El DNI ${data.dni} ya está registrado a nombre de ${existing.fullName}`,
     );
@@ -53,8 +53,8 @@ export async function registerWorkerUseCase(
     }
   }
 
-  const created = await deps.workers.create({
-    id: data.id,
+  const workerId = await deps.workers.create({
+    uuid: data.uuid,
     dni: data.dni,
     fullName,
     nameSource,
@@ -63,15 +63,19 @@ export async function registerWorkerUseCase(
     registeredById: actorId,
   });
 
-  if (created) {
-    await deps.audit.record({
-      type: "worker_registered",
-      actorId,
-      workerId: data.id,
-      payload: { dni: data.dni, company: data.company, nameSource },
-      occurredAt: new Date(data.occurredAt),
-    });
+  if (workerId === null) {
+    // Lost a race with the same registration sent from another request.
+    const worker = await deps.workers.findByDni(data.dni);
+    return { id: worker?.id ?? null, created: false };
   }
 
-  return { id: data.id, created };
+  await deps.audit.record({
+    type: "worker_registered",
+    actorId,
+    workerId,
+    payload: { dni: data.dni, company: data.company, nameSource },
+    occurredAt: new Date(data.occurredAt),
+  });
+
+  return { id: workerId, created: true };
 }

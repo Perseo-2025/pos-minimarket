@@ -5,8 +5,8 @@ import type {
 
 export interface DiscountPolicyRepository {
   getActive(): Promise<DiscountPolicy | null>;
-  findById(id: string): Promise<DiscountPolicy | null>;
+  findById(id: number): Promise<DiscountPolicy | null>;
   listVersions(limit: number): Promise<DiscountPolicy[]>;
   // Deactivates the current version and inserts the new one atomically.
-  createVersion(data: DiscountPolicyData, actorId: string): Promise<DiscountPolicy>;
+  createVersion(data: DiscountPolicyData, actorId: number): Promise<DiscountPolicy>;
 }

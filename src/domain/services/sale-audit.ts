@@ -8,7 +8,7 @@ const CENT = 0.01;
 export interface SaleAuditContext {
   // What the POS actually charged, line by line.
   lines: {
-    productId: string;
+    productId: number;
     unitPrice: number;
     // Recomputed gross amount (unitPrice × quantity).
     lineTotal: number;
@@ -16,7 +16,7 @@ export interface SaleAuditContext {
     isCourtesy: boolean;
   }[];
   // Current catalog entry per product id (missing = unknown product).
-  catalog: Map<string, ProductCatalogEntry>;
+  catalog: Map<number, ProductCatalogEntry>;
   // Worker discount charged (sum of non-courtesy line discounts).
   chargedDiscount: number;
   courtesyTotal: number;

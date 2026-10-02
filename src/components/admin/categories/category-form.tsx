@@ -24,10 +24,12 @@ import {
 import { CATEGORY_ICON_COMPONENTS } from "@/components/pos/pos-icons";
 
 export type EditableCategory = {
-  id: string;
+  id: number;
   name: string;
   icon: CategoryIcon | null;
   sortOrder: number;
+  tracksExpiry: boolean;
+  expiryWarningDays: number;
 };
 
 export function CategoryForm({
@@ -45,6 +47,8 @@ export function CategoryForm({
   const [name, setName] = useState("");
   const [icon, setIcon] = useState<CategoryIcon | null>(null);
   const [sortOrder, setSortOrder] = useState("0");
+  const [tracksExpiry, setTracksExpiry] = useState(false);
+  const [warningDays, setWarningDays] = useState("30");
   const [error, setError] = useState<string | null>(null);
 
   function handleOpenChange(next: boolean) {
@@ -53,6 +57,8 @@ export function CategoryForm({
       setName(category?.name ?? "");
       setIcon(category?.icon ?? null);
       setSortOrder(String(category?.sortOrder ?? nextSortOrder));
+      setTracksExpiry(category?.tracksExpiry ?? false);
+      setWarningDays(String(category?.expiryWarningDays ?? 30));
       setError(null);
     }
     setOpen(next);
@@ -63,7 +69,13 @@ export function CategoryForm({
     setError(null);
 
     startTransition(async () => {
-      const input = { name, icon, sortOrder };
+      const input = {
+        name,
+        icon,
+        sortOrder,
+        tracksExpiry,
+        expiryWarningDays: warningDays,
+      };
       const result = category
         ? await updateCategory({ id: category.id, ...input })
         : await createCategory(input);
@@ -153,6 +165,55 @@ export function CategoryForm({
             <p className="text-xs text-muted-foreground">
               Las categorías con número menor aparecen primero.
             </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label id="category-expiry-label">¿Sus productos vencen?</Label>
+            <ToggleGroup
+              aria-labelledby="category-expiry-label"
+              value={[tracksExpiry ? "yes" : "no"]}
+              onValueChange={(next) => {
+                const [choice] = next as string[];
+                if (choice) setTracksExpiry(choice === "yes");
+              }}
+              variant="outline"
+              spacing={1}
+              className="grid w-full grid-cols-2"
+            >
+              <ToggleGroupItem
+                value="no"
+                className="aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+              >
+                No vencen
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="yes"
+                className="aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+              >
+                Sí, tienen fecha de vencimiento
+              </ToggleGroupItem>
+            </ToggleGroup>
+            {tracksExpiry ? (
+              <div className="flex items-center gap-2 text-sm">
+                <span>Avisar</span>
+                <Input
+                  id="category-warning-days"
+                  aria-label="Días de anticipación"
+                  type="number"
+                  min={1}
+                  max={365}
+                  step={1}
+                  value={warningDays}
+                  onChange={(event) => setWarningDays(event.target.value)}
+                  className="w-20"
+                />
+                <span>días antes de que venzan.</span>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Ej. adornos o útiles. Puedes cambiarlo en un producto puntual.
+              </p>
+            )}
           </div>
 
           {error && (

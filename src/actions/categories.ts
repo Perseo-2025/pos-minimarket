@@ -6,17 +6,13 @@ import {
   setCategoryActiveUseCase,
   updateCategoryUseCase,
 } from "@/application/use-cases/categories/save-category";
-import { UnauthorizedError } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { idSchema } from "@/application/validation/id";
+import { requirePermission } from "@/infrastructure/auth/guards";
 import { categoryRepository } from "@/infrastructure/repositories";
 import { runAction } from "./action-result";
 
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user || session.user.role !== "admin") {
-    throw new UnauthorizedError();
-  }
-}
+// The admin panel (the admin role has every permission).
+const requireAdmin = () => requirePermission("manage");
 
 // Categories show up in the admin lists and drive the POS sidebar.
 function revalidateCategoryViews() {
@@ -41,10 +37,14 @@ export async function updateCategory(input: unknown) {
   });
 }
 
-export async function setCategoryActive(id: string, isActive: boolean) {
+export async function setCategoryActive(id: number, isActive: boolean) {
   return runAction(async () => {
     await requireAdmin();
-    await setCategoryActiveUseCase(categoryRepository, id, isActive);
+    await setCategoryActiveUseCase(
+      categoryRepository,
+      idSchema.parse(id),
+      isActive,
+    );
     revalidateCategoryViews();
   });
 }

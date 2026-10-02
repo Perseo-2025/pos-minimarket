@@ -34,7 +34,7 @@ export async function updateCategoryUseCase(
 // them. Deactivating hides the category and its products from the POS.
 export async function setCategoryActiveUseCase(
   repo: CategoryRepository,
-  id: string,
+  id: number,
   isActive: boolean,
 ) {
   if (!(await repo.findById(id))) {

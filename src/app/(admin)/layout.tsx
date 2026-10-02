@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { AdminSidebar } from "@/components/layout/admin-sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -8,16 +7,14 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { auth } from "@/infrastructure/auth";
+import { requirePagePermission } from "@/infrastructure/auth/guards";
 
 export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-  if (session.user.role !== "admin") redirect("/pos");
+  const user = await requirePagePermission("manage");
 
   // Persisted by SidebarProvider itself, so the collapsed state survives
   // navigation and reloads without a flash.
@@ -27,7 +24,7 @@ export default async function AdminLayout({
   return (
     <TooltipProvider>
       <SidebarProvider defaultOpen={defaultOpen}>
-        <AdminSidebar userName={session.user.name ?? "Administrador"} />
+        <AdminSidebar userName={user.name ?? "Administrador"} />
         <SidebarInset>
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />

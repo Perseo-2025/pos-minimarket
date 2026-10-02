@@ -8,9 +8,9 @@ export interface CreateUserData {
 }
 
 export interface UserRepository {
-  findById(id: string): Promise<User | null>;
+  findById(id: number): Promise<User | null>;
   findByUsername(username: string): Promise<UserWithCredentials | null>;
   findAll(): Promise<UserWithCredentials[]>;
   create(data: CreateUserData): Promise<void>;
-  setActive(id: string, isActive: boolean): Promise<void>;
+  setActive(id: number, isActive: boolean): Promise<void>;
 }

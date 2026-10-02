@@ -5,15 +5,14 @@ import {
 } from "@/application/use-cases/products/upload-product-image";
 import { discardProductImageUseCase } from "@/application/use-cases/products/discard-product-image";
 import { InvalidImageError } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { userWithPermission } from "@/infrastructure/auth/guards";
 import { productRepository } from "@/infrastructure/repositories";
 import { imageStorage } from "@/infrastructure/storage";
 
 // A Route Handler rather than a Server Action: Server Actions cap request
 // bodies at 1 MB by default, and product photos routinely exceed that.
 async function isAdmin() {
-  const session = await auth();
-  return session?.user?.role === "admin";
+  return (await userWithPermission("manage")) !== null;
 }
 
 export async function POST(request: Request) {

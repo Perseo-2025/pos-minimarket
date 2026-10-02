@@ -39,12 +39,12 @@ import type {
 } from "@/domain/entities/worker";
 import { usePagination } from "@/hooks/use-pagination";
 import { formatSoles } from "@/lib/money";
-import { DataTable } from "../data-table";
+import { DataTable, ID_COLUMN, IdCell } from "../data-table";
 import { DataTablePagination } from "../data-table-pagination";
 import { WorkerStatusBadge } from "./worker-status-badge";
 
 export type WorkerRow = {
-  id: string;
+  id: number;
   dni: string;
   fullName: string;
   nameSource: WorkerNameSource;
@@ -59,6 +59,7 @@ export type WorkerRow = {
 type Detail = Extract<Awaited<ReturnType<typeof getWorkerDetail>>, { ok: true }>["data"];
 
 const COLUMNS = [
+  ID_COLUMN,
   { label: "Trabajador" },
   { label: "Empresa" },
   { label: "Estado" },
@@ -139,6 +140,7 @@ export function WorkerTable({
       >
         {pagination.rows.map((worker) => (
           <TableRow key={worker.id}>
+            <IdCell id={worker.id} />
             <TableCell>
               <button
                 type="button"

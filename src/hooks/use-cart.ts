@@ -2,23 +2,31 @@
 
 import { useMemo, useState } from "react";
 import type { CartItem } from "@/types";
+import {
+  type CaptureSource,
+  mergeCaptureSources,
+} from "@/domain/value-objects/capture-source";
 import { round2 } from "@/domain/value-objects/money";
 
 export function useCart() {
   const [items, setItems] = useState<CartItem[]>([]);
 
   function addItem(product: {
-    id: string;
+    id: number;
     name: string;
     priceSale: number;
     workerDiscountPercent: number;
-  }) {
+  }, source: CaptureSource = "manual") {
     setItems((prev) => {
       const existing = prev.find((item) => item.productId === product.id);
       if (existing) {
         return prev.map((item) =>
           item.productId === product.id
-            ? { ...item, quantity: item.quantity + 1 }
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+                captureSource: mergeCaptureSources([item.captureSource, source]) ?? source,
+              }
             : item,
         );
       }
@@ -31,12 +39,13 @@ export function useCart() {
           quantity: 1,
           workerDiscountPercent: product.workerDiscountPercent,
           isCourtesy: false,
+          captureSource: source,
         },
       ];
     });
   }
 
-  function setQuantity(productId: string, quantity: number) {
+  function setQuantity(productId: number, quantity: number) {
     if (quantity <= 0) {
       removeItem(productId);
       return;
@@ -48,7 +57,7 @@ export function useCart() {
     );
   }
 
-  function setCourtesy(productId: string, isCourtesy: boolean) {
+  function setCourtesy(productId: number, isCourtesy: boolean) {
     setItems((prev) =>
       prev.map((item) =>
         item.productId === productId ? { ...item, isCourtesy } : item,
@@ -56,7 +65,7 @@ export function useCart() {
     );
   }
 
-  function removeItem(productId: string) {
+  function removeItem(productId: number) {
     setItems((prev) => prev.filter((item) => item.productId !== productId));
   }
 

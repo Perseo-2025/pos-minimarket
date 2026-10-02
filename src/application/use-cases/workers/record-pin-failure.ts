@@ -7,14 +7,14 @@ import { pinFailureSchema } from "@/application/validation/worker";
 export async function recordPinFailureUseCase(
   deps: { workers: WorkerRepository; audit: AuditRepository },
   input: unknown,
-  actorId: string,
+  actorId: number,
 ) {
   const data = pinFailureSchema.parse(input);
 
   const worker = await deps.workers.findById(data.workerId);
   if (!worker) return;
 
-  await deps.audit.recordWithId(data.id, {
+  await deps.audit.recordWithUuid(data.uuid, {
     type: "worker_pin_failed",
     actorId,
     workerId: worker.id,

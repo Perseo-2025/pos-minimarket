@@ -1,4 +1,5 @@
 import type { AuditFlag } from "./audit";
+import type { CaptureSource } from "../value-objects/capture-source";
 import type { WorkerVerification } from "./worker";
 
 export type PaymentType = "cash" | "yape_plin" | "card";
@@ -13,8 +14,7 @@ export const PAYMENT_TYPE_LABELS: Record<PaymentType, string> = {
 export type SaleStatus = "completed" | "voided";
 
 export interface SaleItemInput {
-  id: string;
-  productId: string;
+  productId: number;
   productName: string;
   unitPrice: number;
   quantity: number;
@@ -25,29 +25,31 @@ export interface SaleItemInput {
   discountAmount?: number;
   // Given away, approved by an admin at the till.
   isCourtesy?: boolean;
+  captureSource?: CaptureSource | null;
 }
 
-// The shape a sale is created with — the id and every item id are supplied
-// by the client, since a sale can be built entirely offline before it ever
-// reaches the server (see SaleRepository.insertWithItems for idempotency).
+// The shape a sale is created with. Its uuid is supplied by the client, since
+// a sale can be built entirely offline before it ever reaches the server
+// (see SaleRepository.insertWithItems for idempotency); the numeric id is
+// assigned by the database on sync.
 // cashierId is captured at checkout time — not at sync time — so a sale made
 // offline stays attributed to whoever actually charged it, even if another
 // cashier is logged in when the queue finally syncs.
 export interface SaleInput {
-  id: string;
-  cashierId: string;
+  uuid: string;
+  cashierId: number;
   paymentType: PaymentType;
   items: SaleItemInput[];
   total: number;
   clientCreatedAt: string;
   // Airport-worker discount (all optional: plain customer sales, and sales
   // queued before this feature existed, carry none of it).
-  workerId?: string;
+  workerId?: number;
   workerVerification?: WorkerVerification;
   // Signed proof that the PIN was checked online (see worker-token).
   verificationToken?: string;
   discountTotal?: number;
-  policyId?: string;
+  policyId?: number;
   // Signed admin approval covering the courtesy lines (see courtesy-token).
   courtesyToken?: string;
 }
@@ -55,8 +57,10 @@ export interface SaleInput {
 // What is actually persisted, after the server re-priced and audited the
 // sale. Amounts are the ones the POS charged; flags record any disagreement.
 export interface SaleRecord {
-  id: string;
-  cashierId: string;
+  uuid: string;
+  // cash_shifts.uuid of the shift it was charged in (null: before shifts).
+  shiftUuid: string | null;
+  cashierId: number;
   paymentType: PaymentType;
   items: SaleItemInput[];
   clientCreatedAt: string;
@@ -64,22 +68,24 @@ export interface SaleRecord {
   discountTotal: number;
   discountPercent: number;
   courtesyTotal: number;
-  courtesyApprovedBy: string | null;
+  courtesyApprovedBy: number | null;
   total: number;
-  workerId: string | null;
-  policyId: string | null;
+  workerId: number | null;
+  policyId: number | null;
   workerVerification: WorkerVerification;
   pointsEarned: number;
   auditFlags: AuditFlag[];
 }
 
 export interface SaleItem extends SaleItemInput {
-  saleId: string;
+  id: number;
+  saleId: number;
 }
 
 export interface Sale {
-  id: string;
-  cashierId: string;
+  id: number;
+  uuid: string;
+  cashierId: number;
   cashierName?: string;
   status: SaleStatus;
   paymentType: PaymentType;
@@ -89,7 +95,7 @@ export interface Sale {
   courtesyTotal: number;
   courtesyApprovedByName: string | null;
   total: number;
-  workerId: string | null;
+  workerId: number | null;
   workerName: string | null;
   workerDni: string | null;
   workerVerification: WorkerVerification;

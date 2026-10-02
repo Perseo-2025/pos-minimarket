@@ -9,7 +9,12 @@ import type {
   CategoryRepository,
 } from "@/domain/repositories/category-repository";
 import { db } from "@/infrastructure/db/client";
-import { categories, products } from "@/infrastructure/db/schema";
+import {
+  categories,
+  products,
+  supplierCategories,
+  suppliers,
+} from "@/infrastructure/db/schema";
 
 function toCategory(row: typeof categories.$inferSelect): Category {
   return {
@@ -17,6 +22,8 @@ function toCategory(row: typeof categories.$inferSelect): Category {
     name: row.name,
     icon: row.icon as CategoryIcon | null,
     sortOrder: row.sortOrder,
+    tracksExpiry: row.tracksExpiry,
+    expiryWarningDays: row.expiryWarningDays,
     isActive: row.isActive,
   };
 }
@@ -36,10 +43,24 @@ export class DrizzleCategoryRepository implements CategoryRepository {
       .groupBy(categories.id)
       .orderBy(...order);
 
+    const links = await db
+      .select({
+        categoryId: supplierCategories.categoryId,
+        id: suppliers.id,
+        name: sql<string>`coalesce(${suppliers.tradeName}, ${suppliers.businessName})`,
+      })
+      .from(supplierCategories)
+      .innerJoin(suppliers, eq(suppliers.id, supplierCategories.supplierId))
+      .where(eq(suppliers.isActive, true))
+      .orderBy(asc(suppliers.businessName));
+
     return rows.map((row) => ({
       ...toCategory(row.category),
       productCount: row.productCount,
       activeProductCount: row.activeProductCount,
+      suppliers: links
+        .filter((link) => link.categoryId === row.category.id)
+        .map(({ id, name }) => ({ id, name })),
     }));
   }
 
@@ -52,7 +73,7 @@ export class DrizzleCategoryRepository implements CategoryRepository {
     return rows.map(toCategory);
   }
 
-  async findById(id: string): Promise<Category | null> {
+  async findById(id: number): Promise<Category | null> {
     const [row] = await db
       .select()
       .from(categories)
@@ -61,7 +82,7 @@ export class DrizzleCategoryRepository implements CategoryRepository {
     return row ? toCategory(row) : null;
   }
 
-  async existsByName(name: string, excludeId?: string): Promise<boolean> {
+  async existsByName(name: string, excludeId?: number): Promise<boolean> {
     // Mirrors the lower(name) unique index.
     const sameName = sql`lower(${categories.name}) = lower(${name})`;
     const [row] = await db
@@ -76,14 +97,14 @@ export class DrizzleCategoryRepository implements CategoryRepository {
     await db.insert(categories).values(data);
   }
 
-  async update(id: string, data: CategoryData): Promise<void> {
+  async update(id: number, data: CategoryData): Promise<void> {
     await db
       .update(categories)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(categories.id, id));
   }
 
-  async setActive(id: string, isActive: boolean): Promise<void> {
+  async setActive(id: number, isActive: boolean): Promise<void> {
     await db
       .update(categories)
       .set({ isActive, updatedAt: new Date() })

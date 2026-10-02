@@ -65,6 +65,7 @@ async function SalesReport({ date }: { date: string }) {
       discountPercent: item.discountPercent ?? 0,
       discountAmount: item.discountAmount ?? 0,
       isCourtesy: item.isCourtesy ?? false,
+      captureSource: item.captureSource ?? null,
     })),
   }));
 

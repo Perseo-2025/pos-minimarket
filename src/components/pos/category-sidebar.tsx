@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils";
 import { CategoryGlyph } from "./category-glyph";
 
 export type SidebarCategory = {
-  value: string;
+  // Category id.
+  value: number;
   label: string;
   icon: string | null;
 };
@@ -15,8 +16,8 @@ export function CategorySidebar({
   onSelect,
 }: {
   categories: SidebarCategory[];
-  selected: string;
-  onSelect: (category: string) => void;
+  selected: number | null;
+  onSelect: (category: number) => void;
 }) {
   return (
     <aside className="flex w-24 shrink-0 flex-col gap-2 overflow-y-auto border-r bg-sidebar p-2 sm:w-36 sm:p-3">

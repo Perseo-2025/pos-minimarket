@@ -39,7 +39,7 @@ export async function getWorkerSnapshot() {
 
 // After a PIN change the worker must wait for approval. Applied locally at
 // once so the old PIN stops working on this tablet even before syncing.
-export async function markWorkerPendingLocally(workerId: string) {
+export async function markWorkerPendingLocally(workerId: number) {
   const db = await getOfflineDb();
   const snapshot = await db.get("workerSnapshot", "current");
   if (!snapshot) return;
@@ -137,7 +137,7 @@ export async function verifyPinOffline(
   await submitWorkerOp({
     id: crypto.randomUUID(),
     op: "pin_failed",
-    data: { id: crypto.randomUUID(), workerId: worker.id, occurredAt },
+    data: { uuid: crypto.randomUUID(), workerId: worker.id, occurredAt },
     label: `Clave incorrecta de ${worker.dni}`,
   });
 

@@ -1,3 +1,4 @@
+import { can } from "@/domain/entities/user";
 import { InvalidAdminCredentialsError } from "@/domain/errors";
 import type { AuditRepository } from "@/domain/repositories/audit-repository";
 import type { UserRepository } from "@/domain/repositories/user-repository";
@@ -10,9 +11,9 @@ export interface ApproveCourtesyDeps {
   users: UserRepository;
   audit: AuditRepository;
   issueCourtesyToken: (input: {
-    saleId: string;
-    cashierId: string;
-    adminId: string;
+    saleUuid: string;
+    cashierId: number;
+    adminId: number;
     amount: number;
   }) => string;
 }
@@ -23,7 +24,7 @@ export interface ApproveCourtesyDeps {
 export async function approveCourtesyUseCase(
   deps: ApproveCourtesyDeps,
   input: unknown,
-  cashierId: string,
+  cashierId: number,
 ) {
   const data = courtesyApprovalSchema.parse(input);
   const amount = round2(data.items.reduce((sum, item) => sum + lineTotal(item), 0));
@@ -37,11 +38,11 @@ export async function approveCourtesyUseCase(
     password: data.password,
   });
 
-  if (!admin || admin.role !== "admin") {
+  if (!admin || !can(admin.role, "manage")) {
     await deps.audit.record({
       type: "courtesy_denied",
       actorId: cashierId,
-      saleId: data.saleId,
+      saleUuid: data.saleUuid,
       payload: { username: data.username, amount, items },
       occurredAt: new Date(),
     });
@@ -51,14 +52,14 @@ export async function approveCourtesyUseCase(
   await deps.audit.record({
     type: "courtesy_approved",
     actorId: admin.id,
-    saleId: data.saleId,
+    saleUuid: data.saleUuid,
     payload: { cashierId, amount, items },
     occurredAt: new Date(),
   });
 
   return {
     token: deps.issueCourtesyToken({
-      saleId: data.saleId,
+      saleUuid: data.saleUuid,
       cashierId,
       adminId: admin.id,
       amount,

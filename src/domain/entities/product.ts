@@ -3,11 +3,13 @@ import type { CategoryIcon } from "./category";
 // priceCost/stockQuantity/trackStock exist for a future inventory phase and
 // are unused by any phase-1 use case.
 export interface Product {
-  id: string;
+  id: number;
   sku: string | null;
+  // Printed on the unit; boxes/displays carry theirs in presentations.
+  barcode: string | null;
   name: string;
   description: string | null;
-  categoryId: string;
+  categoryId: number;
   categoryName: string;
   categoryIcon: CategoryIcon | null;
   priceSale: number;
@@ -16,6 +18,11 @@ export interface Product {
   priceCost: number | null;
   stockQuantity: number | null;
   trackStock: boolean;
+  // Set on the product itself; null = follow the category.
+  tracksExpiryOverride: boolean | null;
+  // Effective: the override, or else the category's setting.
+  tracksExpiry: boolean;
+  expiryWarningDays: number;
   imageUrl: string | null;
   isActive: boolean;
 }

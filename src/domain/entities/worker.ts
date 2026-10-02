@@ -38,7 +38,9 @@ export const PIN_LENGTH = 6;
 export const PIN_PATTERN = /^\d{6}$/;
 
 export interface Worker {
-  id: string;
+  id: number;
+  // Client-generated at registration (see CreateWorkerData).
+  uuid: string;
   dni: string;
   fullName: string;
   nameSource: WorkerNameSource;
@@ -46,7 +48,7 @@ export interface Worker {
   status: WorkerStatus;
   pendingReason: WorkerPendingReason | null;
   pointsBalance: number;
-  registeredById: string | null;
+  registeredById: number | null;
   registeredByName?: string | null;
   approvedAt: Date | null;
   createdAt: Date;
@@ -71,7 +73,7 @@ export interface WorkerDiscountUsage {
 }
 
 export interface WorkerPurchase {
-  saleId: string;
+  saleId: number;
   clientCreatedAt: Date;
   cashierName: string | null;
   subtotal: number;

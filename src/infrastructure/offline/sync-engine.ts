@@ -1,4 +1,5 @@
 import { listPendingSales, markSaleStatus, markSaleSynced } from "./queue";
+import { syncShiftOps } from "./shift-ops";
 import { refreshWorkerSnapshot } from "./worker-cache";
 import { SessionRejectedError, syncWorkerOps } from "./worker-ops";
 
@@ -62,7 +63,16 @@ export async function runSync() {
 
   try {
     sessionInvalid = false;
-    // Worker registrations / PIN resets / failed-PIN events first.
+    // Till shifts first (a closing must follow its opening and movements),
+    // then worker registrations / PIN events, then the sales.
+    try {
+      await syncShiftOps();
+    } catch (error) {
+      if (error instanceof SessionRejectedError) {
+        sessionInvalid = true;
+        return;
+      }
+    }
     let workerOpsSynced = 0;
     try {
       workerOpsSynced = await syncWorkerOps();
@@ -82,8 +92,9 @@ export async function runSync() {
       try {
         await markSaleStatus(sale.id, "syncing");
         await syncOne(sale.id, {
-          id: sale.id,
+          uuid: sale.id,
           cashierId: sale.cashierId,
+          shiftUuid: sale.shiftUuid,
           paymentType: sale.paymentType,
           items: sale.items,
           total: sale.total,

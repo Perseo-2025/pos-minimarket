@@ -6,12 +6,12 @@ import {
   ForbiddenError,
   UnauthorizedError,
 } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { userWithPermission } from "@/infrastructure/auth/guards";
 import { saleDeps } from "@/infrastructure/deps";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user || !["admin", "cashier"].includes(session.user.role)) {
+  const user = await userWithPermission("sell");
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const result = await createSaleUseCase(
       saleDeps,
       body,
-      session.user.id,
+      user.id,
     );
     return NextResponse.json({ synced: true, ...result });
   } catch (error) {

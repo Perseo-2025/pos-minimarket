@@ -27,25 +27,25 @@ describe("worker-token", () => {
     process.env.AUTH_SECRET ??= "test-secret";
   });
 
-  const expected = { workerId: "w1", cashierId: "c1", at: new Date() };
+  const expected = { workerId: 1, cashierId: 10, at: new Date() };
 
   it("accepts a token for the same worker and cashier", () => {
-    assert.equal(verifyWorkerToken(issueWorkerToken("w1", "c1"), expected), true);
+    assert.equal(verifyWorkerToken(issueWorkerToken(1, 10), expected), true);
   });
 
   it("rejects a token issued to another cashier or worker", () => {
-    assert.equal(verifyWorkerToken(issueWorkerToken("w1", "c2"), expected), false);
-    assert.equal(verifyWorkerToken(issueWorkerToken("w2", "c1"), expected), false);
+    assert.equal(verifyWorkerToken(issueWorkerToken(1, 11), expected), false);
+    assert.equal(verifyWorkerToken(issueWorkerToken(2, 10), expected), false);
   });
 
   it("rejects a tampered or missing token", () => {
-    const token = issueWorkerToken("w1", "c1");
+    const token = issueWorkerToken(1, 10);
     assert.equal(verifyWorkerToken(`${token}x`, expected), false);
     assert.equal(verifyWorkerToken(undefined, expected), false);
   });
 
   it("rejects a sale made after the token expired", () => {
-    const token = issueWorkerToken("w1", "c1");
+    const token = issueWorkerToken(1, 10);
     const later = new Date(Date.now() + 16 * 60 * 1000);
     assert.equal(verifyWorkerToken(token, { ...expected, at: later }), false);
   });
@@ -57,17 +57,18 @@ describe("courtesy-token", async () => {
     process.env.AUTH_SECRET ??= "test-secret";
   });
 
-  const approval = { saleId: "s1", cashierId: "c1", adminId: "a1", amount: 7 };
-  const expected = { saleId: "s1", cashierId: "c1", amount: 7, at: new Date() };
+  const SALE = "11111111-1111-4111-8111-111111111111";
+  const approval = { saleUuid: SALE, cashierId: 10, adminId: 100, amount: 7 };
+  const expected = { saleUuid: SALE, cashierId: 10, amount: 7, at: new Date() };
 
   it("returns the approving admin for the exact sale, cashier and amount", () => {
-    assert.equal(verifyCourtesyToken(issueCourtesyToken(approval), expected), "a1");
+    assert.equal(verifyCourtesyToken(issueCourtesyToken(approval), expected), 100);
   });
 
   it("rejects another sale, another cashier or a different amount", () => {
     const token = issueCourtesyToken(approval);
-    assert.equal(verifyCourtesyToken(token, { ...expected, saleId: "s2" }), null);
-    assert.equal(verifyCourtesyToken(token, { ...expected, cashierId: "c2" }), null);
+    assert.equal(verifyCourtesyToken(token, { ...expected, saleUuid: "22222222-2222-4222-8222-222222222222" }), null);
+    assert.equal(verifyCourtesyToken(token, { ...expected, cashierId: 11 }), null);
     assert.equal(verifyCourtesyToken(token, { ...expected, amount: 7.01 }), null);
   });
 
@@ -79,7 +80,7 @@ describe("courtesy-token", async () => {
   });
 
   it("is not interchangeable with a worker token", () => {
-    const workerToken = issueWorkerToken("w1", "c1");
+    const workerToken = issueWorkerToken(1, 10);
     assert.equal(verifyCourtesyToken(workerToken, expected), null);
   });
 });

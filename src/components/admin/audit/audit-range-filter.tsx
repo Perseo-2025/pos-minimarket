@@ -15,16 +15,19 @@ export function AuditRangeFilter({
   from,
   to,
   today,
+  basePath = "/admin/audit",
 }: {
   from: string;
   to: string;
   today: string;
+  // The report page this filter belongs to.
+  basePath?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   function go(nextFrom: string, nextTo: string) {
-    startTransition(() => router.push(`/admin/audit?from=${nextFrom}&to=${nextTo}`));
+    startTransition(() => router.push(`${basePath}?from=${nextFrom}&to=${nextTo}`));
   }
 
   const presets = [

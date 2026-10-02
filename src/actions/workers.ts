@@ -9,38 +9,38 @@ import {
   setWorkerStatusUseCase,
   type WorkerAction,
 } from "@/application/use-cases/workers/manage-workers";
-import { UnauthorizedError } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { idSchema } from "@/application/validation/id";
+import { requirePermission } from "@/infrastructure/auth/guards";
 import { DNI_LOOKUP_TIMEOUT_MS, workerDeps } from "@/infrastructure/deps";
 import { runAction, runDataAction } from "./action-result";
 
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user || session.user.role !== "admin") {
-    throw new UnauthorizedError();
-  }
-  return session.user;
-}
+// The admin panel (the admin role has every permission).
+const requireAdmin = () => requirePermission("manage");
 
 function revalidateWorkerViews() {
   revalidatePath("/admin/workers");
   revalidatePath("/admin/audit");
 }
 
-export async function setWorkerStatus(workerId: string, action: WorkerAction) {
+export async function setWorkerStatus(workerId: number, action: WorkerAction) {
   return runAction(async () => {
     const admin = await requireAdmin();
-    await setWorkerStatusUseCase(workerDeps, workerId, action, admin.id);
+    await setWorkerStatusUseCase(
+      workerDeps,
+      idSchema.parse(workerId),
+      action,
+      admin.id,
+    );
     revalidateWorkerViews();
   });
 }
 
-export async function refreshWorkerName(workerId: string) {
+export async function refreshWorkerName(workerId: number) {
   return runDataAction(async () => {
     const admin = await requireAdmin();
     const result = await refreshWorkerNameUseCase(
       workerDeps,
-      workerId,
+      idSchema.parse(workerId),
       admin.id,
       DNI_LOOKUP_TIMEOUT_MS,
     );
@@ -49,12 +49,12 @@ export async function refreshWorkerName(workerId: string) {
   });
 }
 
-export async function getWorkerDetail(workerId: string) {
+export async function getWorkerDetail(workerId: number) {
   return runDataAction(async () => {
     await requireAdmin();
     const { worker, purchases } = await getWorkerDetailUseCase(
       workerDeps.workers,
-      workerId,
+      idSchema.parse(workerId),
     );
     return {
       worker: {

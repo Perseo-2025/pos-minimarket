@@ -21,10 +21,10 @@ export async function verifyWorkerPinUseCase(
     workers: WorkerRepository;
     audit: AuditRepository;
     pinHasher: PinHasher;
-    issueToken: (workerId: string, cashierId: string) => string;
+    issueToken: (workerId: number, cashierId: number) => string;
   },
   input: unknown,
-  cashierId: string,
+  cashierId: number,
 ) {
   const data = verifyPinSchema.parse(input);
 

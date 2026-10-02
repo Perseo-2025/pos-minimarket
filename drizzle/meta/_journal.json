@@ -50,6 +50,97 @@
       "when": 1790708583149,
       "tag": "0006_per_product_discount",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790718329649,
+      "tag": "0007_inventory_base",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0008_numeric_ids",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790800001000,
+      "tag": "0009_drop_legacy_uuids",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790910176449,
+      "tag": "0010_suppliers",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790911290298,
+      "tag": "0011_expiry_lots",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790912249828,
+      "tag": "0012_presentations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790914247039,
+      "tag": "0013_receipts_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790914898070,
+      "tag": "0014_warehouse_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790915460239,
+      "tag": "0015_purchase_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790915896166,
+      "tag": "0016_receipt_discrepancies",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790916419448,
+      "tag": "0017_daily_counts",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790918618065,
+      "tag": "0018_cash_shifts",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790918965497,
+      "tag": "0019_barcode_capture_source",
+      "breakpoints": true
     }
   ]
 }

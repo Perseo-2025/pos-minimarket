@@ -6,8 +6,8 @@ import type { CategoryRepository } from "@/domain/repositories/category-reposito
 // admin can still fix a price without being forced to recategorize.
 export async function ensureAssignableCategory(
   categories: CategoryRepository,
-  categoryId: string,
-  currentCategoryId?: string,
+  categoryId: number,
+  currentCategoryId?: number,
 ) {
   const category = await categories.findById(categoryId);
   if (!category) throw new ValidationError("La categoría no existe");

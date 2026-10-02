@@ -18,7 +18,7 @@ function toRow(event: AuditEventInput) {
     type: event.type,
     actorId: event.actorId,
     workerId: event.workerId ?? null,
-    saleId: event.saleId ?? null,
+    saleUuid: event.saleUuid ?? null,
     payload: event.payload ?? {},
     occurredAt: event.occurredAt,
   };
@@ -29,11 +29,11 @@ export class DrizzleAuditRepository implements AuditRepository {
     await db.insert(auditEvents).values(toRow(event));
   }
 
-  async recordWithId(id: string, event: AuditEventInput) {
+  async recordWithUuid(uuid: string, event: AuditEventInput) {
     await db
       .insert(auditEvents)
-      .values({ id, ...toRow(event) })
-      .onConflictDoNothing({ target: auditEvents.id });
+      .values({ uuid, ...toRow(event) })
+      .onConflictDoNothing({ target: auditEvents.uuid });
   }
 
   async listEvents(filter: {
@@ -70,14 +70,14 @@ export class DrizzleAuditRepository implements AuditRepository {
       workerId: event.workerId,
       workerName,
       workerDni,
-      saleId: event.saleId,
+      saleUuid: event.saleUuid,
       payload: event.payload,
       occurredAt: event.occurredAt,
       createdAt: event.createdAt,
     }));
   }
 
-  async countPinFailuresSince(workerId: string, since: Date) {
+  async countPinFailuresSince(workerId: number, since: Date) {
     const [row] = await db
       .select({ total: sql<number>`count(*)`.mapWith(Number) })
       .from(auditEvents)
@@ -133,7 +133,7 @@ export class DrizzleAuditRepository implements AuditRepository {
       )
       .groupBy(auditEvents.actorId, users.name);
 
-    const byCashier = new Map<string, CashierAuditSummary>();
+    const byCashier = new Map<number, CashierAuditSummary>();
     for (const row of saleRows) {
       byCashier.set(row.cashierId, {
         ...row,

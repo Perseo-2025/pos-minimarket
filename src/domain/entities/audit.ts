@@ -73,7 +73,10 @@ export type AuditEventType =
   | "worker_name_updated"
   | "policy_changed"
   | "courtesy_approved"
-  | "courtesy_denied";
+  | "courtesy_denied"
+  | "sold_without_stock"
+  | "sold_expired"
+  | "stock_adjusted";
 
 export const AUDIT_EVENT_LABELS: Record<AuditEventType, string> = {
   worker_pin_failed: "Clave incorrecta",
@@ -87,19 +90,23 @@ export const AUDIT_EVENT_LABELS: Record<AuditEventType, string> = {
   policy_changed: "Descuento modificado",
   courtesy_approved: "Cortesía aprobada",
   courtesy_denied: "Cortesía rechazada (clave incorrecta)",
+  sold_without_stock: "Vendido sin stock",
+  sold_expired: "Vendido de un lote vencido",
+  stock_adjusted: "Ajuste de stock por conteo",
 };
 
 export interface AuditEventInput {
   type: AuditEventType;
-  actorId: string | null;
-  workerId?: string | null;
-  saleId?: string | null;
+  actorId: number | null;
+  workerId?: number | null;
+  // sales.uuid: a courtesy is approved before its sale reaches the server.
+  saleUuid?: string | null;
   payload?: Record<string, unknown>;
   occurredAt: Date;
 }
 
 export interface AuditEvent extends Required<Omit<AuditEventInput, "payload">> {
-  id: string;
+  id: number;
   actorName: string | null;
   workerName: string | null;
   workerDni: string | null;
@@ -109,7 +116,7 @@ export interface AuditEvent extends Required<Omit<AuditEventInput, "payload">> {
 
 // Per-cashier aggregates for the anti-fraud report.
 export interface CashierAuditSummary {
-  cashierId: string;
+  cashierId: number;
   cashierName: string;
   sales: number;
   discountedSales: number;
@@ -121,7 +128,7 @@ export interface CashierAuditSummary {
 }
 
 export interface FlaggedSale {
-  saleId: string;
+  saleId: number;
   clientCreatedAt: Date;
   cashierName: string;
   workerName: string | null;

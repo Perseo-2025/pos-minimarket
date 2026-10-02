@@ -2,13 +2,13 @@
 // a new version, so every sale keeps pointing at the exact rule it was
 // charged under and the audit trail shows who changed what and when.
 export interface DiscountPolicy {
-  id: string;
+  id: number;
   discountPercent: number;
   maxDiscountedSalesPerDay: number;
   maxDiscountPerMonth: number;
   pointsPerSol: number;
   isActive: boolean;
-  createdById: string | null;
+  createdById: number | null;
   createdByName?: string | null;
   createdAt: Date;
 }

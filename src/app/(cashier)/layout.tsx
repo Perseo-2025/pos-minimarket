@@ -1,15 +1,14 @@
 import { StoreIcon, UserRoundIcon } from "lucide-react";
-import { redirect } from "next/navigation";
+import { AreaLinks } from "@/components/layout/area-links";
 import { LogoutButton } from "@/components/layout/logout-button";
-import { auth } from "@/infrastructure/auth";
+import { requirePagePermission } from "@/infrastructure/auth/guards";
 
 export default async function CashierLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
+  const user = await requirePagePermission("sell");
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -21,9 +20,10 @@ export default async function CashierLayout({
           POS NAVEGUZ · Caja
         </span>
         <div className="flex items-center gap-3">
+          <AreaLinks role={user.role} current="sell" />
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <UserRoundIcon className="size-4" aria-hidden />
-            {session.user.name}
+            {user.name}
           </span>
           <LogoutButton />
         </div>

@@ -47,11 +47,11 @@ export function CartPanel({
   onRemoveWorker: () => void;
   paymentType: PaymentType;
   onPaymentTypeChange: (paymentType: PaymentType) => void;
-  onIncrease: (productId: string) => void;
-  onDecrease: (productId: string) => void;
-  onRemove: (productId: string) => void;
+  onIncrease: (productId: number) => void;
+  onDecrease: (productId: number) => void;
+  onRemove: (productId: number) => void;
   onCheckout: () => void;
-  onToggleCourtesy: (productId: string) => void;
+  onToggleCourtesy: (productId: number) => void;
   // Admin approval state of the courtesy lines in this cart.
   courtesy: { approvedBy: string | null; needsApproval: boolean };
   onRequestCourtesyApproval: () => void;

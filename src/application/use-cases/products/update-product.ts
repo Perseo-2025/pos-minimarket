@@ -1,8 +1,10 @@
 import type { CategoryRepository } from "@/domain/repositories/category-repository";
 import { ValidationError } from "@/domain/errors";
 import type { ImageStorage } from "@/domain/repositories/image-storage";
+import type { PresentationRepository } from "@/domain/repositories/presentation-repository";
 import type { ProductRepository } from "@/domain/repositories/product-repository";
 import { productUpdateSchema } from "@/application/validation/product";
+import { ensureBarcodeFree } from "./ensure-barcode";
 import { ensureAssignableCategory } from "./ensure-category";
 import { imageKeyFromUrl } from "./upload-product-image";
 
@@ -10,6 +12,7 @@ export async function updateProductUseCase(
   repos: {
     products: ProductRepository;
     categories: CategoryRepository;
+    presentations: PresentationRepository;
     images: ImageStorage;
   },
   input: unknown,
@@ -22,6 +25,7 @@ export async function updateProductUseCase(
     data.categoryId,
     previous.categoryId,
   );
+  await ensureBarcodeFree(repos, data.barcode, { productId: data.id });
 
   await repos.products.update(data);
 

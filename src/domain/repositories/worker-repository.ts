@@ -9,19 +9,19 @@ import type {
 
 export interface CreateWorkerData {
   // Client-generated so a registration queued offline is idempotent.
-  id: string;
+  uuid: string;
   dni: string;
   fullName: string;
   nameSource: WorkerNameSource;
   company: string;
   pinHash: string;
-  registeredById: string;
+  registeredById: number;
 }
 
 // What the POS keeps in IndexedDB to identify workers without internet.
 // PIN hashes are only included for active workers.
 export interface OfflineWorker {
-  id: string;
+  id: number;
   dni: string;
   fullName: string;
   company: string;
@@ -32,21 +32,22 @@ export interface OfflineWorker {
 }
 
 export interface WorkerRepository {
-  findById(id: string): Promise<WorkerWithPin | null>;
+  findById(id: number): Promise<WorkerWithPin | null>;
   findByDni(dni: string): Promise<WorkerWithPin | null>;
   findAll(status?: WorkerStatus): Promise<Worker[]>;
   countByStatus(): Promise<Record<WorkerStatus, number>>;
-  // Returns false when a worker with this id already exists (retry).
-  create(data: CreateWorkerData): Promise<boolean>;
+  // Returns the new worker's id, or null when a worker with this uuid
+  // already exists (retry).
+  create(data: CreateWorkerData): Promise<number | null>;
   // A new PIN always sends the worker back to "pending" (pin_reset).
-  replacePin(id: string, pinHash: string): Promise<void>;
-  setStatus(id: string, status: WorkerStatus, actorId: string): Promise<void>;
-  updateName(id: string, fullName: string, nameSource: WorkerNameSource): Promise<void>;
+  replacePin(id: number, pinHash: string): Promise<void>;
+  setStatus(id: number, status: WorkerStatus, actorId: number): Promise<void>;
+  updateName(id: number, fullName: string, nameSource: WorkerNameSource): Promise<void>;
   discountUsage(
-    workerId: string,
+    workerId: number,
     dayStart: Date,
     monthStart: Date,
   ): Promise<WorkerDiscountUsage>;
   offlineSnapshot(dayStart: Date, monthStart: Date): Promise<OfflineWorker[]>;
-  purchaseHistory(workerId: string, limit: number): Promise<WorkerPurchase[]>;
+  purchaseHistory(workerId: number, limit: number): Promise<WorkerPurchase[]>;
 }

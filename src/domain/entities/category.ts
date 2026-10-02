@@ -65,14 +65,20 @@ export const CATEGORY_ICON_LABELS: Record<CategoryIcon, string> = {
 };
 
 export interface Category {
-  id: string;
+  id: number;
   name: string;
   icon: CategoryIcon | null;
   sortOrder: number;
+  // Products keep dated lots and are flagged expiryWarningDays before
+  // they expire (a product may override tracksExpiry).
+  tracksExpiry: boolean;
+  expiryWarningDays: number;
   isActive: boolean;
 }
 
 export interface CategoryWithCounts extends Category {
   productCount: number;
   activeProductCount: number;
+  // Active suppliers that deliver this category.
+  suppliers: { id: number; name: string }[];
 }

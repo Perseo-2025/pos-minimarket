@@ -20,7 +20,7 @@ import { useIsOnline } from "@/hooks/use-online-status";
 import { formatSoles } from "@/lib/money";
 
 export type CourtesyLine = {
-  productId: string;
+  productId: number;
   productName: string;
   unitPrice: number;
   quantity: number;
@@ -38,13 +38,14 @@ export type CourtesyApproval = {
 export function CourtesyDialog({
   open,
   onOpenChange,
-  saleId,
+  saleUuid,
   lines,
   onApproved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  saleId: string;
+  // The approval is signed for this sale (it has no numeric id before sync).
+  saleUuid: string;
   // Every line that will be free once approved (not only the new one).
   lines: CourtesyLine[];
   onApproved: (approval: CourtesyApproval) => void;
@@ -75,7 +76,7 @@ export function CourtesyDialog({
       const response = await fetch("/api/courtesy/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, saleId, items: lines }),
+        body: JSON.stringify({ username, password, saleUuid, items: lines }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) {

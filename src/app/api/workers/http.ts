@@ -9,15 +9,11 @@ import {
   WorkerNotActiveError,
   WorkerNotFoundError,
 } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { userWithPermission } from "@/infrastructure/auth/guards";
 
-// Only logged-in staff (cashier/admin) may use the worker endpoints.
-export async function requireStaff() {
-  const session = await auth();
-  if (!session?.user || !["admin", "cashier"].includes(session.user.role)) {
-    return null;
-  }
-  return session.user;
+// The worker endpoints serve the till: whoever can sell.
+export function requireStaff() {
+  return userWithPermission("sell");
 }
 
 export function unauthorized() {

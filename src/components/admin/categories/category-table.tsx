@@ -17,25 +17,26 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import type { CategoryWithCounts } from "@/domain/entities/category";
 import { usePagination } from "@/hooks/use-pagination";
-import { DataTable } from "../data-table";
+import { DataTable, ID_COLUMN, IdCell } from "../data-table";
 import { DataTablePagination } from "../data-table-pagination";
+import { DeactivateButton } from "../deactivate-button";
 import { StatusBadge } from "../status-badge";
 import { CategoryForm } from "./category-form";
 
 const COLUMNS = [
+  ID_COLUMN,
+  { label: "Orden", className: "w-16 text-right" },
   { label: "Categoría" },
   { label: "Productos" },
-  { label: "Orden", className: "text-right" },
+  { label: "Proveedores" },
   { label: "Estado" },
   { label: "Acciones", className: "text-right" },
 ];
-
-const destructiveGhost =
-  "text-destructive hover:bg-destructive/10 hover:text-destructive";
 
 export function CategoryTable({
   categories,
@@ -78,12 +79,23 @@ export function CategoryTable({
 
         return (
           <TableRow key={category.id}>
+            <IdCell id={category.id} />
+            <TableCell className="text-right text-muted-foreground tabular-nums">
+              {category.sortOrder}
+            </TableCell>
             <TableCell>
               <div className="flex items-center gap-3">
                 <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <CategoryGlyph icon={category.icon} className="size-5" />
                 </span>
-                <span className="font-medium">{category.name}</span>
+                <div className="leading-tight">
+                  <div className="font-medium">{category.name}</div>
+                  {category.tracksExpiry && (
+                    <div className="text-xs text-muted-foreground">
+                      Vence · avisa {category.expiryWarningDays} días antes
+                    </div>
+                  )}
+                </div>
               </div>
             </TableCell>
             <TableCell>
@@ -105,8 +117,23 @@ export function CategoryTable({
                 </Link>
               )}
             </TableCell>
-            <TableCell className="text-right text-muted-foreground tabular-nums">
-              {category.sortOrder}
+            <TableCell className="max-w-56">
+              {category.suppliers.length === 0 ? (
+                <Link
+                  href="/admin/suppliers"
+                  className="text-xs text-muted-foreground hover:underline"
+                >
+                  Sin proveedor · Asignar
+                </Link>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {category.suppliers.map((supplier) => (
+                    <Badge key={supplier.id} variant="outline">
+                      {supplier.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </TableCell>
             <TableCell>
               <StatusBadge active={category.isActive} />
@@ -132,30 +159,22 @@ export function CategoryTable({
                     Activar
                   </Button>
                 ) : active === 0 ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={destructiveGhost}
+                  <DeactivateButton
+                    label={`Desactivar ${category.name}`}
                     disabled={isPending}
                     onClick={() => toggle(category)}
-                  >
-                    Desactivar
-                  </Button>
+                  />
                 ) : (
                   // Deactivating hides its products from the POS — confirm.
                   <AlertDialog>
                     <AlertDialogTrigger
                       render={
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className={destructiveGhost}
+                        <DeactivateButton
+                          label={`Desactivar ${category.name}`}
                           disabled={isPending}
                         />
                       }
-                    >
-                      Desactivar
-                    </AlertDialogTrigger>
+                    />
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>

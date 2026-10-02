@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ClipboardListIcon,
   IdCardIcon,
   LayoutDashboardIcon,
   PackageIcon,
@@ -8,7 +9,10 @@ import {
   ShieldCheckIcon,
   StoreIcon,
   TagsIcon,
+  TruckIcon,
   UsersIcon,
+  WalletIcon,
+  WarehouseIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -28,13 +32,18 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { initials } from "@/lib/initials";
+import { AREAS } from "./area-links";
 import { LogoutButton } from "./logout-button";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboardIcon },
   { href: "/admin/sales", label: "Ventas", icon: ReceiptTextIcon },
+  { href: "/admin/caja", label: "Cierres de caja", icon: WalletIcon },
   { href: "/admin/categories", label: "Categorías", icon: TagsIcon },
   { href: "/admin/products", label: "Productos", icon: PackageIcon },
+  { href: "/admin/compras", label: "Compras", icon: ClipboardListIcon },
+  { href: "/admin/inventory", label: "Inventario", icon: WarehouseIcon },
+  { href: "/admin/suppliers", label: "Proveedores", icon: TruckIcon },
   { href: "/admin/users", label: "Usuarios", icon: UsersIcon },
   {
     href: "/admin/workers",
@@ -101,6 +110,27 @@ export function AdminSidebar({ userName }: { userName: string }) {
                   </SidebarMenuItem>
                 );
               })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Ir a</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-1">
+              {AREAS.filter((area) => area.permission !== "manage").map(
+                (area) => (
+                  <SidebarMenuItem key={area.href}>
+                    <SidebarMenuButton
+                      tooltip={area.label}
+                      render={<Link href={area.href} />}
+                      className="h-9"
+                    >
+                      <area.icon />
+                      <span>{area.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ),
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

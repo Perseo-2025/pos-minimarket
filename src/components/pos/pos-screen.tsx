@@ -1,6 +1,7 @@
 "use client";
 
 import { ShoppingBasketIcon, ShoppingCartIcon } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,17 @@ import {
   lineTotal,
   priceSale,
 } from "@/domain/services/sale-pricing";
+import {
+  CatalogAge,
+  ScanFlash,
+  ScannerStatus,
+  useScanFlash,
+} from "@/components/scanner/scanner-status";
+import { buildBarcodeIndex } from "@/domain/services/barcode-scan";
+import type { CaptureSource } from "@/domain/value-objects/capture-source";
 import { useCart } from "@/hooks/use-cart";
+import { useScanner } from "@/hooks/use-scanner";
+import { useCashShift } from "@/hooks/use-cash-shift";
 import { enqueueSale } from "@/infrastructure/offline/queue";
 import { runSync } from "@/infrastructure/offline/sync-engine";
 import type { CachedPolicy, PendingSale } from "@/infrastructure/offline/types";
@@ -24,6 +35,7 @@ import {
   getWorkerSnapshot,
   refreshWorkerSnapshot,
 } from "@/infrastructure/offline/worker-cache";
+import { storeDateKey } from "@/domain/value-objects/store-time";
 import { formatSoles } from "@/lib/money";
 import { CartPanel } from "./cart-panel";
 import { type SidebarCategory, CategorySidebar } from "./category-sidebar";
@@ -33,9 +45,12 @@ import {
   type CourtesyLine,
   CourtesyDialog,
 } from "./courtesy-dialog";
+import { type ShelfExpiry, ExpiryReminder } from "./expiry-reminder";
 import { OfflineIndicator } from "./offline-indicator";
+import { OpenShiftPanel } from "./open-shift-panel";
 import { ProductGrid } from "./product-grid";
 import { SearchBar } from "./search-bar";
+import { ShiftMenu } from "./shift-menu";
 import { type AppliedWorker, WorkerDiscountDialog } from "./worker-discount-dialog";
 
 // A worker's PIN check is valid for one sale and a short time only: it can't
@@ -43,9 +58,10 @@ import { type AppliedWorker, WorkerDiscountDialog } from "./worker-discount-dial
 const WORKER_VERIFICATION_TTL_MS = 10 * 60 * 1000;
 
 type Product = {
-  id: string;
+  id: number;
   name: string;
-  categoryId: string;
+  barcode: string | null;
+  categoryId: number;
   categoryName: string;
   categoryIcon: string | null;
   priceSale: number;
@@ -53,14 +69,26 @@ type Product = {
   imageUrl?: string | null;
 };
 
+type BoxCode = { id: number; productId: number; barcode: string | null; name: string };
+
 export function PosScreen({
   products,
   cashierId,
+  shelfExpiry,
+  boxCodes,
+  catalogAt,
 }: {
   products: Product[];
-  cashierId: string;
+  cashierId: number;
+  boxCodes: BoxCode[];
+  // When the server built this catalog (old = page served from the cache).
+  catalogAt: string;
+  // Shop-floor lots to check (expired or inside their warning window).
+  shelfExpiry: ShelfExpiry[];
 }) {
   const cart = useCart();
+  // Selling needs an open till shift ("Abrir caja") on this device.
+  const cash = useCashShift(cashierId);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -76,15 +104,17 @@ export function PosScreen({
   // Courtesy lines the admin is being asked to approve (null = dialog closed),
   // and the product that becomes free once they do.
   const [courtesyRequest, setCourtesyRequest] = useState<{
-    saleId: string;
+    saleUuid: string;
     lines: CourtesyLine[];
-    addProductId: string | null;
+    addProductId: number | null;
   } | null>(null);
-  // The sale id exists before checkout: a courtesy approval is signed for it.
-  const saleIdRef = useRef<string | null>(null);
-  function currentSaleId() {
-    saleIdRef.current ??= crypto.randomUUID();
-    return saleIdRef.current;
+  // The sale's uuid exists before checkout: a courtesy approval is signed for
+  // it, and it is the sync's idempotency key (the numeric id comes later,
+  // from the server).
+  const saleUuidRef = useRef<string | null>(null);
+  function currentSaleUuid() {
+    saleUuidRef.current ??= crypto.randomUUID();
+    return saleUuidRef.current;
   }
 
   // Download the worker list + discount rule so the discount also works
@@ -115,7 +145,7 @@ export function PosScreen({
     pricing.courtesyTotal > 0 &&
     (courtesyApproval === null || courtesyApproval.amount !== pricing.courtesyTotal);
 
-  function courtesyLines(extraProductId: string | null): CourtesyLine[] {
+  function courtesyLines(extraProductId: number | null): CourtesyLine[] {
     return cart.items
       .filter((item) => item.isCourtesy || item.productId === extraProductId)
       .map((item) => ({
@@ -126,7 +156,7 @@ export function PosScreen({
       }));
   }
 
-  function toggleCourtesy(productId: string) {
+  function toggleCourtesy(productId: number) {
     const item = cart.items.find((i) => i.productId === productId);
     if (!item) return;
     if (item.isCourtesy) {
@@ -135,14 +165,14 @@ export function PosScreen({
     }
     setMobileCartOpen(false);
     setCourtesyRequest({
-      saleId: currentSaleId(),
+      saleUuid: currentSaleUuid(),
       lines: courtesyLines(productId),
       addProductId: productId,
     });
   }
 
   function handleCourtesyApproved(approval: CourtesyApproval) {
-    if (courtesyRequest?.addProductId) {
+    if (courtesyRequest?.addProductId != null) {
       cart.setCourtesy(courtesyRequest.addProductId, true);
     }
     setCourtesyApproval(approval);
@@ -183,7 +213,7 @@ export function PosScreen({
   // category order set in the admin panel, and categories with no active
   // products are left out of the sidebar.
   const categories: SidebarCategory[] = useMemo(() => {
-    const seen = new Set<string>();
+    const seen = new Set<number>();
     const result: SidebarCategory[] = [];
     for (const product of products) {
       if (seen.has(product.categoryId)) continue;
@@ -197,14 +227,14 @@ export function PosScreen({
     return result;
   }, [products]);
 
-  const [chosenCategory, setSelectedCategory] = useState(
-    () => categories[0]?.value ?? "",
+  const [chosenCategory, setSelectedCategory] = useState<number | null>(
+    () => categories[0]?.value ?? null,
   );
   // If the chosen category disappears after a catalog refresh (deactivated
   // in the admin panel), fall back to the first one instead of a blank grid.
   const selectedCategory = categories.some((c) => c.value === chosenCategory)
     ? chosenCategory
-    : (categories[0]?.value ?? "");
+    : (categories[0]?.value ?? null);
 
   const query = search.trim().toLowerCase();
   const visibleProducts =
@@ -215,11 +245,11 @@ export function PosScreen({
   async function handleConfirm() {
     if (courtesyNeedsApproval) return;
     const sale: PendingSale = {
-      id: currentSaleId(),
+      id: currentSaleUuid(),
       cashierId,
+      shiftUuid: cash.shift?.uuid,
       paymentType,
       items: cart.items.map((item, index) => ({
-        id: crypto.randomUUID(),
         productId: item.productId,
         productName: item.name,
         unitPrice: item.unitPrice,
@@ -228,6 +258,7 @@ export function PosScreen({
         discountPercent: pricing.lines[index].discountPercent,
         discountAmount: pricing.lines[index].discountAmount,
         isCourtesy: item.isCourtesy,
+        captureSource: item.captureSource,
       })),
       ...(pricing.courtesyTotal > 0 &&
         courtesyApproval && { courtesyToken: courtesyApproval.token }),
@@ -248,15 +279,16 @@ export function PosScreen({
 
     // Always local-first: the checkout never waits on the network.
     await enqueueSale(sale);
+    await cash.countSale();
     void runSync();
 
     cart.clear();
     setCheckoutOpen(false);
     // The worker and any courtesy belong to this sale only: the next
-    // customer starts clean, with a new sale id.
+    // customer starts clean, with a new sale uuid.
     setWorker(null);
     setCourtesyApproval(null);
-    saleIdRef.current = null;
+    saleUuidRef.current = null;
     // Most sales are cash — start the next one from there.
     setPaymentType("cash");
     toast.success(`Venta registrada · ${PAYMENT_TYPE_LABELS[paymentType]}`, {
@@ -266,22 +298,90 @@ export function PosScreen({
     });
   }
 
-  function increaseQty(id: string) {
+  // Computed on the device: the page may have been cached offline.
+  const todayKey = storeDateKey(new Date());
+
+  // The till can't know which lot is in the cashier's hand: when the oldest
+  // lot on the shelf is expired, ask to check the package before charging.
+  function handleSelect(
+    product: Parameters<typeof cart.addItem>[0],
+    source: CaptureSource = "manual",
+  ) {
+    cart.addItem(product, source);
+    const expired = shelfExpiry.find(
+      (item) => item.productId === product.id && item.expiresAt < todayKey,
+    );
+    if (expired) {
+      toast.warning(`Revisa la fecha de ${product.name}`, {
+        id: `expired-${product.id}`,
+        description: `Hay unidades que vencieron el ${expired.expiresAt.split("-").reverse().join("/")}. Si el envase está vencido, retíralo y no lo cobres.`,
+      });
+    }
+  }
+
+  const barcodes = useMemo(
+    () =>
+      buildBarcodeIndex({
+        units: products.map((p) => ({ productId: p.id, barcode: p.barcode })),
+        presentations: boxCodes,
+      }),
+    [products, boxCodes],
+  );
+  const feedback = useScanFlash();
+
+  // The ring reader at the till: a scan adds the unit to the basket. Paused
+  // while a dialog (charge, worker, courtesy) has the cashier's attention.
+  const { lastScanAt } = useScanner(
+    (code, source) => {
+      const target = barcodes.get(code);
+      if (target?.kind === "unit") {
+        const product = products.find((p) => p.id === target.productId);
+        if (product) {
+          handleSelect(product, source);
+          feedback.ok();
+          return;
+        }
+      }
+      feedback.fail();
+      if (target?.kind === "presentation") {
+        const box = boxCodes.find((b) => b.id === target.presentationId);
+        const product = products.find((p) => p.id === target.productId);
+        toast.warning(`Ese es el código del ${box?.name ?? "empaque"}`, {
+          id: "scan-box",
+          description: `En caja se cobra por unidad: escanea ${product ? `la unidad de ${product.name}` : "la unidad"}.`,
+        });
+        return;
+      }
+      toast.error("Código no registrado", {
+        id: "scan-unknown",
+        description: `${code}. Búscalo por nombre y avisa al administrador para que lo registre.`,
+      });
+    },
+    {
+      enabled: !checkoutOpen && !workerDialogOpen && courtesyRequest === null,
+    },
+  );
+
+  function increaseQty(id: number) {
     cart.setQuantity(
       id,
       (cart.items.find((i) => i.productId === id)?.quantity ?? 0) + 1,
     );
   }
 
-  function decreaseQty(id: string) {
+  function decreaseQty(id: number) {
     cart.setQuantity(
       id,
       (cart.items.find((i) => i.productId === id)?.quantity ?? 0) - 1,
     );
   }
 
+  if (cash.loading) return null;
+  if (!cash.shift) return <OpenShiftPanel onOpen={cash.open} />;
+
   return (
     <div className="flex h-[calc(100vh-57px)]">
+      <ScanFlash flash={feedback.flash} />
       <CategorySidebar
         categories={categories}
         selected={selectedCategory}
@@ -290,16 +390,28 @@ export function PosScreen({
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-center gap-3 border-b p-3">
           <SearchBar value={search} onChange={setSearch} />
-          <div className="absolute right-4">
+          <div className="absolute right-4 flex items-center gap-2">
+            <ShiftMenu shift={cash.shift} onMove={cash.move} onClose={cash.close} />
+            <ExpiryReminder items={shelfExpiry} todayKey={todayKey} />
+            <CatalogAge generatedAt={catalogAt} />
+            <ScannerStatus lastScanAt={lastScanAt} />
             <OfflineIndicator />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 pb-20 md:pb-4">
-          <ProductGrid
-            products={visibleProducts}
-            onSelect={cart.addItem}
-            showWorkerDiscount={worker !== null}
-          />
+          {products.length === 0 ? (
+            <EmptyState
+              icon={ShoppingBasketIcon}
+              title="Aún no hay productos en la tienda"
+              description="Cuando el almacén traslade mercadería a la Tienda, aparecerá aquí lista para vender."
+            />
+          ) : (
+            <ProductGrid
+              products={visibleProducts}
+              onSelect={handleSelect}
+              showWorkerDiscount={worker !== null}
+            />
+          )}
         </div>
         {cart.items.length > 0 && (
           <Button
@@ -336,7 +448,7 @@ export function PosScreen({
           onRequestCourtesyApproval={() => {
             setMobileCartOpen(false);
             setCourtesyRequest({
-              saleId: currentSaleId(),
+              saleUuid: currentSaleUuid(),
               lines: courtesyLines(null),
               addProductId: null,
             });
@@ -377,7 +489,7 @@ export function PosScreen({
               onRequestCourtesyApproval={() => {
                 setMobileCartOpen(false);
                 setCourtesyRequest({
-              saleId: currentSaleId(),
+              saleUuid: currentSaleUuid(),
               lines: courtesyLines(null),
               addProductId: null,
             });
@@ -402,7 +514,7 @@ export function PosScreen({
       <CourtesyDialog
         open={courtesyRequest !== null}
         onOpenChange={(open) => !open && setCourtesyRequest(null)}
-        saleId={courtesyRequest?.saleId ?? ""}
+        saleUuid={courtesyRequest?.saleUuid ?? ""}
         lines={courtesyRequest?.lines ?? []}
         onApproved={handleCourtesyApproved}
       />

@@ -19,21 +19,22 @@ export async function POST(request: Request) {
   const body = (await readJson(request)) as { op?: string; data?: unknown } | null;
 
   try {
+    const data = body?.data;
     switch (body?.op) {
       case "register":
         return NextResponse.json(
           await registerWorkerUseCase(
             workerDeps,
-            body.data,
+            data,
             user.id,
             DNI_LOOKUP_TIMEOUT_MS,
           ),
         );
       case "pin_reset":
-        await requestPinResetUseCase(workerDeps, body.data, user.id);
+        await requestPinResetUseCase(workerDeps, data, user.id);
         return NextResponse.json({ ok: true });
       case "pin_failed":
-        await recordPinFailureUseCase(workerDeps, body.data, user.id);
+        await recordPinFailureUseCase(workerDeps, data, user.id);
         return NextResponse.json({ ok: true });
       default:
         return NextResponse.json(

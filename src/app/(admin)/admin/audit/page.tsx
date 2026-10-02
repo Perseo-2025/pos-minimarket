@@ -2,8 +2,9 @@ import { AlertTriangleIcon, InfoIcon } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { getAuditReportUseCase } from "@/application/use-cases/audit/get-audit-report";
+import { listShiftsUseCase } from "@/application/use-cases/cash/cash-shifts";
 import { AuditRangeFilter } from "@/components/admin/audit/audit-range-filter";
-import { DataTable } from "@/components/admin/data-table";
+import { DataTable, ID_COLUMN, IdCell } from "@/components/admin/data-table";
 import { PageHeader } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,11 +26,15 @@ import {
 } from "@/domain/entities/audit";
 import { round2 } from "@/domain/value-objects/money";
 import { STORE_TIME_ZONE, storeDateKey, storeDayRange } from "@/domain/value-objects/store-time";
-import { auditRepository } from "@/infrastructure/repositories";
+import {
+  auditRepository,
+  cashShiftRepository,
+} from "@/infrastructure/repositories";
+import { shiftDifferences } from "@/domain/services/cash-shift";
+import { parseDateRange } from "@/lib/date-range";
 import { formatSoles } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const dateTimeFormat = new Intl.DateTimeFormat("es-PE", {
   dateStyle: "short",
@@ -44,6 +49,9 @@ const EVENT_TONES: Partial<Record<AuditEventType, string>> = {
   worker_pin_reset_requested: "text-amber-700 dark:text-amber-400",
   worker_rejected: "text-muted-foreground",
   worker_suspended: "text-destructive",
+  sold_without_stock: "text-amber-700 dark:text-amber-400",
+  sold_expired: "text-destructive",
+  stock_adjusted: "text-amber-700 dark:text-amber-400",
 };
 
 const EVENT_CHANNELS: Record<string, string> = {
@@ -72,11 +80,22 @@ function percent(part: number, total: number) {
 
 async function AuditReport({ from, to }: { from: string; to: string }) {
   const range = { from: storeDayRange(from).from, to: storeDayRange(to).to };
-  const { cashiers, flagged, events } = await getAuditReportUseCase(
-    auditRepository,
-    range.from,
-    range.to,
-  );
+  const [{ cashiers, flagged, events }, shifts] = await Promise.all([
+    getAuditReportUseCase(auditRepository, range.from, range.to),
+    listShiftsUseCase(cashShiftRepository, range.from, range.to),
+  ]);
+  // Cash missing at closing, per cashier (only what was short).
+  const missingCash = new Map<number, number>();
+  for (const shift of shifts) {
+    if (!shift.counted) continue;
+    const diff = shiftDifferences(shift.counted, shift.expected).cash;
+    if (diff < 0) {
+      missingCash.set(
+        shift.cashierId,
+        round2((missingCash.get(shift.cashierId) ?? 0) - diff),
+      );
+    }
+  }
 
   const totals = cashiers.reduce(
     (acc, row) => ({
@@ -123,6 +142,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         />
         <DataTable
           columns={[
+            ID_COLUMN,
             { label: "Cajero" },
             { label: "Ventas", className: "text-right" },
             { label: "Con descuento", className: "text-right" },
@@ -130,6 +150,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
             { label: "Sin internet", className: "text-right" },
             { label: "Claves fallidas", className: "text-right" },
             { label: "Cambios de clave", className: "text-right" },
+            { label: "Faltante en caja", className: "text-right" },
             { label: "Revisar" },
           ]}
           isEmpty={cashiers.length === 0}
@@ -139,6 +160,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
             const reasons = reviewReasons(row, averageRate);
             return (
               <TableRow key={row.cashierId} className={cn(reasons.length > 0 && "bg-amber-500/5")}>
+                <IdCell id={row.cashierId} />
                 <TableCell className="font-medium">{row.cashierName}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.sales}</TableCell>
                 <TableCell className="text-right tabular-nums">
@@ -155,6 +177,16 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{row.pinFailures}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.pinResets}</TableCell>
+                <TableCell
+                  className={cn(
+                    "text-right tabular-nums",
+                    missingCash.get(row.cashierId) && "font-medium text-destructive",
+                  )}
+                >
+                  {missingCash.get(row.cashierId)
+                    ? formatSoles(missingCash.get(row.cashierId)!)
+                    : "—"}
+                </TableCell>
                 <TableCell>
                   {reasons.length === 0 ? (
                     <span className="text-xs text-muted-foreground">Todo normal</span>
@@ -186,8 +218,8 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         />
         <DataTable
           columns={[
+            ID_COLUMN,
             { label: "Fecha" },
-            { label: "Ticket" },
             { label: "Cajero" },
             { label: "Trabajador" },
             { label: "Descuento", className: "text-right" },
@@ -199,11 +231,9 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         >
           {flagged.map((sale) => (
             <TableRow key={sale.saleId}>
+              <IdCell id={sale.saleId} />
               <TableCell className="text-muted-foreground tabular-nums">
                 {dateTimeFormat.format(sale.clientCreatedAt)}
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                #{sale.saleId.slice(0, 8).toUpperCase()}
               </TableCell>
               <TableCell>{sale.cashierName}</TableCell>
               <TableCell className="text-sm">
@@ -250,6 +280,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
         />
         <DataTable
           columns={[
+            ID_COLUMN,
             { label: "Fecha" },
             { label: "Qué pasó" },
             { label: "Trabajador" },
@@ -262,6 +293,7 @@ async function AuditReport({ from, to }: { from: string; to: string }) {
             const channel = EVENT_CHANNELS[String(event.payload.channel ?? "")];
             return (
               <TableRow key={event.id}>
+                <IdCell id={event.id} />
                 <TableCell className="text-muted-foreground tabular-nums">
                   {dateTimeFormat.format(event.occurredAt)}
                 </TableCell>
@@ -326,24 +358,11 @@ function SectionTitle({ title, description }: { title: string; description: stri
   );
 }
 
-function parseRange(params: { from?: unknown; to?: unknown }, today: string) {
-  const valid = (value: unknown) =>
-    typeof value === "string" && DATE_PATTERN.test(value) && value <= today;
-  const to = valid(params.to) ? (params.to as string) : today;
-  const defaultFrom = new Date(`${today}T12:00:00Z`);
-  defaultFrom.setUTCDate(defaultFrom.getUTCDate() - 6);
-  const from =
-    valid(params.from) && (params.from as string) <= to
-      ? (params.from as string)
-      : defaultFrom.toISOString().slice(0, 10);
-  return { from: from > to ? to : from, to };
-}
-
 export default async function AdminAuditPage({
   searchParams,
 }: PageProps<"/admin/audit">) {
   const today = storeDateKey(new Date());
-  const { from, to } = parseRange(await searchParams, today);
+  const { from, to } = parseDateRange(await searchParams, today);
 
   return (
     <div className="flex flex-col gap-6">

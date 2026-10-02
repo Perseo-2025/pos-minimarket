@@ -5,7 +5,7 @@ export type OnlineVerifyResult =
   | {
       kind: "ok";
       worker: {
-        id: string;
+        id: number;
         dni: string;
         fullName: string;
         company: string;

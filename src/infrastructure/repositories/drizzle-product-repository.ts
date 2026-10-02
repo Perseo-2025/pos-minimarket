@@ -1,13 +1,19 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, exists, gt, inArray, ne } from "drizzle-orm";
 import type { CategoryIcon } from "@/domain/entities/category";
 import type { Product, ProductCatalogEntry } from "@/domain/entities/product";
+import { tracksExpiry } from "@/domain/services/expiry";
 import type {
   CreateProductData,
   ProductRepository,
   UpdateProductData,
 } from "@/domain/repositories/product-repository";
 import { db } from "@/infrastructure/db/client";
-import { categories, products } from "@/infrastructure/db/schema";
+import {
+  categories,
+  locations,
+  products,
+  stockLevels,
+} from "@/infrastructure/db/schema";
 
 type ProductRow = {
   product: typeof products.$inferSelect;
@@ -18,6 +24,7 @@ function toProduct({ product: row, category }: ProductRow): Product {
   return {
     id: row.id,
     sku: row.sku,
+    barcode: row.barcode,
     name: row.name,
     description: row.description,
     categoryId: row.categoryId,
@@ -28,6 +35,9 @@ function toProduct({ product: row, category }: ProductRow): Product {
     priceCost: row.priceCost === null ? null : Number(row.priceCost),
     stockQuantity: row.stockQuantity,
     trackStock: row.trackStock,
+    tracksExpiryOverride: row.tracksExpiry,
+    tracksExpiry: tracksExpiry(row.tracksExpiry, category.tracksExpiry),
+    expiryWarningDays: category.expiryWarningDays,
     imageUrl: row.imageUrl,
     isActive: row.isActive,
   };
@@ -49,9 +59,26 @@ const order = [
 ];
 
 export class DrizzleProductRepository implements ProductRepository {
-  async findActive(): Promise<Product[]> {
+  async findSellable(): Promise<Product[]> {
+    const onShopFloor = db
+      .select({ productId: stockLevels.productId })
+      .from(stockLevels)
+      .innerJoin(locations, eq(locations.id, stockLevels.locationId))
+      .where(
+        and(
+          eq(stockLevels.productId, products.id),
+          eq(locations.kind, "store"),
+          gt(stockLevels.quantity, 0),
+        ),
+      );
     const rows = await selectProducts()
-      .where(and(eq(products.isActive, true), eq(categories.isActive, true)))
+      .where(
+        and(
+          eq(products.isActive, true),
+          eq(categories.isActive, true),
+          exists(onShopFloor),
+        ),
+      )
       .orderBy(...order);
 
     return rows.map(toProduct);
@@ -63,7 +90,7 @@ export class DrizzleProductRepository implements ProductRepository {
     return rows.map(toProduct);
   }
 
-  async findById(id: string): Promise<Product | null> {
+  async findById(id: number): Promise<Product | null> {
     const [row] = await selectProducts()
       .where(eq(products.id, id))
       .limit(1);
@@ -74,9 +101,12 @@ export class DrizzleProductRepository implements ProductRepository {
   async create(data: CreateProductData): Promise<void> {
     await db.insert(products).values({
       name: data.name,
+      barcode: data.barcode,
       description: data.description,
       categoryId: data.categoryId,
       priceSale: data.priceSale.toString(),
+      priceCost: data.priceCost?.toString() ?? null,
+      tracksExpiry: data.tracksExpiry,
       workerDiscountPercent: data.workerDiscountPercent.toString(),
       imageUrl: data.imageUrl ?? null,
     });
@@ -87,9 +117,12 @@ export class DrizzleProductRepository implements ProductRepository {
       .update(products)
       .set({
         name: data.name,
+        barcode: data.barcode,
         description: data.description,
         categoryId: data.categoryId,
         priceSale: data.priceSale.toString(),
+        priceCost: data.priceCost?.toString() ?? null,
+        tracksExpiry: data.tracksExpiry,
         workerDiscountPercent: data.workerDiscountPercent.toString(),
         imageUrl: data.imageUrl,
         updatedAt: new Date(),
@@ -97,11 +130,21 @@ export class DrizzleProductRepository implements ProductRepository {
       .where(eq(products.id, data.id));
   }
 
-  async setActive(id: string, isActive: boolean): Promise<void> {
+  async setActive(id: number, isActive: boolean): Promise<void> {
     await db
       .update(products)
       .set({ isActive, updatedAt: new Date() })
       .where(eq(products.id, id));
+  }
+
+  async existsByBarcode(barcode: string, excludeId?: number) {
+    const sameCode = eq(products.barcode, barcode);
+    const [row] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(excludeId ? and(sameCode, ne(products.id, excludeId)) : sameCode)
+      .limit(1);
+    return row !== undefined;
   }
 
   async isImageInUse(imageUrl: string): Promise<boolean> {
@@ -114,7 +157,7 @@ export class DrizzleProductRepository implements ProductRepository {
     return row !== undefined;
   }
 
-  async findCatalogByIds(ids: string[]): Promise<Map<string, ProductCatalogEntry>> {
+  async findCatalogByIds(ids: number[]): Promise<Map<number, ProductCatalogEntry>> {
     if (ids.length === 0) return new Map();
 
     const rows = await db

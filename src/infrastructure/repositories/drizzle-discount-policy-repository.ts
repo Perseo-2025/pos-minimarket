@@ -34,7 +34,7 @@ export class DrizzleDiscountPolicyRepository implements DiscountPolicyRepository
     return row ? toPolicy(row) : null;
   }
 
-  async findById(id: string) {
+  async findById(id: number) {
     const [row] = await db
       .select()
       .from(discountPolicies)
@@ -53,7 +53,7 @@ export class DrizzleDiscountPolicyRepository implements DiscountPolicyRepository
     return rows.map((row) => toPolicy(row.policy, row.createdByName));
   }
 
-  async createVersion(data: DiscountPolicyData, actorId: string) {
+  async createVersion(data: DiscountPolicyData, actorId: number) {
     return db.transaction(async (tx) => {
       await tx
         .update(discountPolicies)

@@ -3,16 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { createUserUseCase } from "@/application/use-cases/users/create-user";
 import { setUserActiveUseCase } from "@/application/use-cases/users/set-user-active";
-import { UnauthorizedError } from "@/domain/errors";
-import { auth } from "@/infrastructure/auth";
+import { idSchema } from "@/application/validation/id";
+import { requirePermission } from "@/infrastructure/auth/guards";
 import { userRepository } from "@/infrastructure/repositories";
 
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user || session.user.role !== "admin") {
-    throw new UnauthorizedError();
-  }
-}
+// The admin panel (the admin role has every permission).
+const requireAdmin = () => requirePermission("manage");
 
 export async function createUser(input: unknown) {
   await requireAdmin();
@@ -21,9 +17,9 @@ export async function createUser(input: unknown) {
   revalidatePath("/admin/users");
 }
 
-export async function setUserActive(id: string, isActive: boolean) {
+export async function setUserActive(id: number, isActive: boolean) {
   await requireAdmin();
-  await setUserActiveUseCase(userRepository, id, isActive);
+  await setUserActiveUseCase(userRepository, idSchema.parse(id), isActive);
 
   revalidatePath("/admin/users");
 }

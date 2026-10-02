@@ -1,6 +1,8 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type {
+  LocalShift,
   PendingSale,
+  PendingShiftOp,
   PendingWorkerOp,
   PinAttemptRecord,
   WorkerSnapshotRecord,
@@ -26,6 +28,16 @@ interface PosOfflineDB extends DBSchema {
     key: string;
     value: PinAttemptRecord;
   };
+  // v3: till shifts, one open per cashier on this device.
+  cashShifts: {
+    key: number;
+    value: LocalShift;
+  };
+  pendingShiftOps: {
+    key: string;
+    value: PendingShiftOp;
+    indexes: { "by-created": string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<PosOfflineDB>> | null = null;
@@ -36,7 +48,7 @@ export function getOfflineDb() {
   }
 
   if (!dbPromise) {
-    dbPromise = openDB<PosOfflineDB>("pos-minimarket-offline", 2, {
+    dbPromise = openDB<PosOfflineDB>("pos-minimarket-offline", 3, {
       // Incremental: devices already on v1 keep their queued sales.
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
@@ -53,6 +65,13 @@ export function getOfflineDb() {
           });
           ops.createIndex("by-created", "createdAt");
           db.createObjectStore("pinAttempts", { keyPath: "dni" });
+        }
+        if (oldVersion < 3) {
+          db.createObjectStore("cashShifts", { keyPath: "cashierId" });
+          const shiftOps = db.createObjectStore("pendingShiftOps", {
+            keyPath: "id",
+          });
+          shiftOps.createIndex("by-created", "createdAt");
         }
       },
     });

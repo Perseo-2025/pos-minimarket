@@ -6,7 +6,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 // right PIN for that worker, at that cashier's till.
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 
-type TokenPayload = { w: string; c: string; exp: number; n: string };
+type TokenPayload = { w: number; c: number; exp: number; n: string };
 
 function secret() {
   const value = process.env.AUTH_SECRET;
@@ -20,7 +20,7 @@ function sign(data: string) {
     .digest("base64url");
 }
 
-export function issueWorkerToken(workerId: string, cashierId: string) {
+export function issueWorkerToken(workerId: number, cashierId: number) {
   const payload: TokenPayload = {
     w: workerId,
     c: cashierId,
@@ -35,7 +35,7 @@ export function issueWorkerToken(workerId: string, cashierId: string) {
 // synced later is still valid, as long as it was charged within the TTL.
 export function verifyWorkerToken(
   token: string | undefined,
-  expected: { workerId: string; cashierId: string; at: Date },
+  expected: { workerId: number; cashierId: number; at: Date },
 ) {
   if (!token) return false;
 

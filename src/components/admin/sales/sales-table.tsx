@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import {
+  CAPTURE_SOURCE_LABELS,
+  type CaptureSource,
+} from "@/domain/value-objects/capture-source";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -24,11 +28,12 @@ import {
 } from "@/domain/entities/worker";
 import { usePagination } from "@/hooks/use-pagination";
 import { formatSoles } from "@/lib/money";
-import { DataTable } from "../data-table";
+import { DataTable, ID_COLUMN, IdCell } from "../data-table";
 import { DataTablePagination } from "../data-table-pagination";
 
 export type SaleRow = {
-  id: string;
+  // id_sale: also the ticket number.
+  id: number;
   createdAt: string;
   cashierName: string;
   paymentType: PaymentType;
@@ -45,7 +50,7 @@ export type SaleRow = {
   auditFlags: AuditFlag[];
   units: number;
   items: {
-    id: string;
+    id: number;
     productName: string;
     unitPrice: number;
     quantity: number;
@@ -53,12 +58,13 @@ export type SaleRow = {
     discountPercent: number;
     discountAmount: number;
     isCourtesy: boolean;
+    captureSource: CaptureSource | null;
   }[];
 };
 
 const COLUMNS = [
+  ID_COLUMN,
   { label: "Hora" },
-  { label: "Ticket" },
   { label: "Cajero" },
   { label: "Productos", className: "text-right" },
   { label: "Método" },
@@ -78,8 +84,6 @@ const dateTimeFormat = new Intl.DateTimeFormat("es-PE", {
   timeStyle: "short",
 });
 
-// Short, human-friendly ticket reference derived from the sale UUID.
-const ticketCode = (id: string) => id.slice(0, 8).toUpperCase();
 
 export function SalesTable({ sales }: { sales: SaleRow[] }) {
   const pagination = usePagination(sales);
@@ -103,7 +107,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
           <TableRow
             key={sale.id}
             tabIndex={0}
-            aria-label={`Ver detalle del ticket ${ticketCode(sale.id)}`}
+            aria-label={`Ver detalle del ticket ${sale.id}`}
             className="cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
             onClick={() => setSelected(sale)}
             onKeyDown={(event) => {
@@ -113,11 +117,9 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
               }
             }}
           >
+            <IdCell id={sale.id} />
             <TableCell className="text-muted-foreground tabular-nums">
               {timeFormat.format(new Date(sale.createdAt))}
-            </TableCell>
-            <TableCell className="font-mono text-xs">
-              #{ticketCode(sale.id)}
             </TableCell>
             <TableCell>{sale.cashierName}</TableCell>
             <TableCell className="text-right tabular-nums">
@@ -167,7 +169,7 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>Ticket #{ticketCode(selected.id)}</SheetTitle>
+                <SheetTitle>Ticket #{selected.id}</SheetTitle>
                 <SheetDescription>
                   {dateTimeFormat.format(new Date(selected.createdAt))}
                 </SheetDescription>
@@ -232,6 +234,8 @@ export function SalesTable({ sales }: { sales: SaleRow[] }) {
                         </p>
                         <p className="text-xs text-muted-foreground tabular-nums">
                           {item.quantity} × {formatSoles(item.unitPrice)}
+                          {item.captureSource &&
+                            ` · ${CAPTURE_SOURCE_LABELS[item.captureSource]}`}
                         </p>
                         {item.isCourtesy ? (
                           <p className="text-xs font-medium text-brand-orange">

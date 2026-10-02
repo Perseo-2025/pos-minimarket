@@ -17,7 +17,7 @@ export class ForbiddenError extends Error {
 // A sale references a cashier that does not exist — the record itself is
 // invalid, so retrying it will never succeed.
 export class CashierNotFoundError extends Error {
-  constructor(cashierId: string) {
+  constructor(cashierId: number) {
     super(`Cashier ${cashierId} not found`);
     this.name = "CashierNotFoundError";
   }

@@ -1,6 +1,8 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -15,7 +17,16 @@ import {
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
-export const userRoleEnum = pgEnum("user_role", ["admin", "cashier"]);
+// Primary keys are numeric (`id_<entity>`, readable in the admin). Records
+// the POS creates offline (sales, workers, audit events) also carry a
+// client-generated `uuid`: the sync's idempotency key, since a tablet without
+// internet can't know the next numeric id.
+
+export const userRoleEnum = pgEnum("user_role", [
+  "admin",
+  "cashier",
+  "warehouse",
+]);
 export const saleStatusEnum = pgEnum("sale_status", ["completed", "voided"]);
 export const paymentTypeEnum = pgEnum("payment_type", [
   "cash",
@@ -48,16 +59,70 @@ export const loyaltyMovementTypeEnum = pgEnum("loyalty_movement_type", [
   "reverse",
 ]);
 
+export const locationKindEnum = pgEnum("location_kind", ["warehouse", "store"]);
+export const cashShiftStatusEnum = pgEnum("cash_shift_status", [
+  "open",
+  "closed",
+  "reviewed",
+]);
+export const cashMovementTypeEnum = pgEnum("cash_movement_type", ["in", "out"]);
+export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
+  "pending",
+  "partial",
+  "received",
+  "cancelled",
+]);
+// A product counted in the "conteo del día": matched closes on its own;
+// pending waits for the admin, who approves the adjustment or asks for a
+// recount (rejected).
+export const countItemStatusEnum = pgEnum("count_item_status", [
+  "matched",
+  "pending",
+  "approved",
+  "rejected",
+]);
+
+// What happened with units that didn't match the invoice.
+export const discrepancyStatusEnum = pgEnum("discrepancy_status", [
+  "open",
+  // Missing units:
+  "replenished", // the supplier brought them later
+  "credited", // the supplier discounted them (credit note)
+  "written_off", // the store assumes the loss
+  // Extra units:
+  "kept", // the store keeps them
+  "returned", // given back to the supplier
+]);
+export const receiptDocTypeEnum = pgEnum("receipt_doc_type", [
+  "factura",
+  "boleta",
+  "guia",
+  "ninguno",
+]);
+export const stockMovementTypeEnum = pgEnum("stock_movement_type", [
+  "opening",
+  "count_adjustment",
+  "purchase_receipt",
+  "transfer_out",
+  "transfer_in",
+  "sale",
+  "sale_void",
+  "waste",
+  "supplier_return",
+]);
+// How a line's product was identified (barcode reader or by hand); null on
+// lines recorded before the reader existed.
+export const captureSourceEnum = pgEnum("capture_source", ["scan", "manual"]);
+
 export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: integer("id_user").primaryKey().generatedByDefaultAsIdentity(),
   name: text("name").notNull(),
   // Login identifier (e.g. "Ori2026") — not an email address.
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull(),
   isActive: boolean("is_active").notNull().default(true),
-  // Required by the Auth.js adapter's User model; nullable since login is
-  // by username, not email. Ready for a future OAuth provider.
+  // Kept from the Auth.js User model; nullable since login is by username.
   email: text("email").unique(),
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
@@ -69,12 +134,12 @@ export const users = pgTable("users", {
     .defaultNow(),
 });
 
-// Auth.js Drizzle adapter tables. Unused columns (accounts/verificationTokens)
-// stay ready for a future OAuth provider without a schema migration.
+// Auth.js tables, unused with JWT sessions + credentials. They stay ready
+// for a future OAuth provider without a schema migration.
 export const accounts = pgTable(
   "accounts",
   {
-    userId: uuid("user_id")
+    userId: integer("id_user")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type").$type<AdapterAccountType>().notNull(),
@@ -95,7 +160,7 @@ export const accounts = pgTable(
 
 export const sessions = pgTable("sessions", {
   sessionToken: text("session_token").primaryKey(),
-  userId: uuid("user_id")
+  userId: integer("id_user")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expires: timestamp("expires", { withTimezone: true }).notNull(),
@@ -114,11 +179,15 @@ export const verificationTokens = pgTable(
 export const categories = pgTable(
   "categories",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: integer("id_category").primaryKey().generatedByDefaultAsIdentity(),
     name: text("name").notNull(),
     // Key from CATEGORY_ICONS (domain); the UI maps it to an icon component.
     icon: text("icon"),
     sortOrder: integer("sort_order").notNull().default(0),
+    // Products of this category have expiry dates (stock is kept in dated
+    // lots), and how many days before expiring they are flagged.
+    tracksExpiry: boolean("tracks_expiry").notNull().default(false),
+    expiryWarningDays: integer("expiry_warning_days").notNull().default(30),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -136,13 +205,16 @@ export const categories = pgTable(
 export const products = pgTable(
   "products",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: integer("id_product").primaryKey().generatedByDefaultAsIdentity(),
     sku: text("sku").unique(),
+    // Barcode printed on the unit (what the till scans). Boxes and displays
+    // carry theirs in product_presentations; no code may repeat across both.
+    barcode: text("barcode").unique(),
     name: text("name").notNull(),
     description: text("description"),
     // No hard deletes: categories are deactivated, so sale history keeps
     // resolving product -> category.
-    categoryId: uuid("category_id")
+    categoryId: integer("id_category")
       .notNull()
       .references(() => categories.id),
     priceSale: numeric("price_sale", { precision: 10, scale: 2 }).notNull(),
@@ -155,10 +227,16 @@ export const products = pgTable(
     })
       .notNull()
       .default("0"),
-    // Reserved for a future inventory phase — unused by phase-1 UI/actions.
-    priceCost: numeric("price_cost", { precision: 10, scale: 2 }),
+    // Weighted average cost per unit, recalculated on each goods receipt.
+    // 4 decimals: a candy from a S/ 12 box of 144 costs 0.0833.
+    priceCost: numeric("price_cost", { precision: 12, scale: 4 }),
+    // Deprecated: stock lives in stock_levels, per location.
     stockQuantity: integer("stock_quantity"),
+    // Set on the product's first stock count. Sales only move stock of
+    // tracked products, so untracked ones never go negative by accident.
     trackStock: boolean("track_stock").notNull().default(false),
+    // Overrides the category's tracks_expiry; null = follow the category.
+    tracksExpiry: boolean("tracks_expiry"),
     imageUrl: text("image_url"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -171,13 +249,94 @@ export const products = pgTable(
   (table) => [index("products_category_id_idx").on(table.categoryId)],
 );
 
+// Bulk packagings of a product (Display = 24 units, Caja = 6 Displays). A
+// presentation contains qty_of_parent of its parent, or of the unit when it
+// has none; units_total is that chain multiplied out (Caja = 144), kept in
+// sync on every save. Stock is always in units: the POS sells only the unit.
+export const productPresentations = pgTable(
+  "product_presentations",
+  {
+    id: integer("id_presentation").primaryKey().generatedByDefaultAsIdentity(),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    name: text("name").notNull(),
+    parentId: integer("id_parent_presentation"),
+    qtyOfParent: integer("qty_of_parent").notNull(),
+    unitsTotal: integer("units_total").notNull(),
+    // Barcode printed on the box/display, for scanning at reception.
+    barcode: text("barcode").unique(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Named explicitly: the generated name exceeds Postgres' 63 chars.
+    foreignKey({
+      columns: [table.parentId],
+      foreignColumns: [table.id],
+      name: "product_presentations_parent_fk",
+    }),
+    uniqueIndex("product_presentations_name_unique").on(
+      table.productId,
+      sql`lower(${table.name})`,
+    ),
+  ],
+);
+
+// Companies the minimarket buys from. RUC is optional (small suppliers may
+// not have one) but unique when present.
+export const suppliers = pgTable("suppliers", {
+  id: integer("id_supplier").primaryKey().generatedByDefaultAsIdentity(),
+  ruc: text("ruc").unique(),
+  // Razón social, as printed on the invoice.
+  businessName: text("business_name").notNull(),
+  tradeName: text("trade_name"),
+  contactName: text("contact_name"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  notes: text("notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Which categories each supplier delivers. Many-to-many: one supplier can
+// bring several categories, and one category comes from several suppliers.
+export const supplierCategories = pgTable(
+  "supplier_categories",
+  {
+    supplierId: integer("id_supplier")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    categoryId: integer("id_category")
+      .notNull()
+      .references(() => categories.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.supplierId, table.categoryId] }),
+    index("supplier_categories_category_idx").on(table.categoryId),
+  ],
+);
+
 // Airport workers: customers entitled to the staff discount. Independent from
 // `users` (the minimarket's own staff) — workers never log into the POS.
 export const workers = pgTable(
   "workers",
   {
-    // Client-generated UUID: a registration made offline supplies its own id.
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: integer("id_worker").primaryKey().generatedByDefaultAsIdentity(),
+    // Client-generated: a registration made offline supplies its own uuid, so
+    // a retried sync never registers the worker twice.
+    uuid: uuid("uuid").notNull().unique().defaultRandom(),
     dni: text("dni").notNull().unique(),
     fullName: text("full_name").notNull(),
     nameSource: workerNameSourceEnum("name_source").notNull(),
@@ -191,8 +350,8 @@ export const workers = pgTable(
     pendingReason: workerPendingReasonEnum("pending_reason").default("new"),
     // Denormalized sum of loyalty_ledger, updated in the same transaction.
     pointsBalance: integer("points_balance").notNull().default(0),
-    registeredBy: uuid("registered_by").references(() => users.id),
-    approvedBy: uuid("approved_by").references(() => users.id),
+    registeredBy: integer("registered_by").references(() => users.id),
+    approvedBy: integer("approved_by").references(() => users.id),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -206,7 +365,7 @@ export const workers = pgTable(
 
 // Versioned discount rules: never updated, a change inserts a new row.
 export const discountPolicies = pgTable("discount_policies", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: integer("id_policy").primaryKey().generatedByDefaultAsIdentity(),
   discountPercent: numeric("discount_percent", {
     precision: 5,
     scale: 2,
@@ -218,7 +377,7 @@ export const discountPolicies = pgTable("discount_policies", {
   }).notNull(),
   pointsPerSol: numeric("points_per_sol", { precision: 5, scale: 2 }).notNull(),
   isActive: boolean("is_active").notNull().default(true),
-  createdBy: uuid("created_by").references(() => users.id),
+  createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -227,10 +386,12 @@ export const discountPolicies = pgTable("discount_policies", {
 export const sales = pgTable(
   "sales",
   {
-    // Client-generated UUID (offline-created sales supply their own id);
-    // defaultRandom() is only a fallback for server-side inserts (e.g. seed).
-    id: uuid("id").primaryKey().defaultRandom(),
-    cashierId: uuid("cashier_id")
+    id: integer("id_sale").primaryKey().generatedByDefaultAsIdentity(),
+    // Client-generated (offline sales supply their own): the idempotency key
+    // of the sync and what a courtesy approval is signed for. defaultRandom()
+    // is only a fallback for server-side inserts (e.g. seed).
+    uuid: uuid("uuid").notNull().unique().defaultRandom(),
+    cashierId: integer("id_cashier")
       .notNull()
       .references(() => users.id),
     status: saleStatusEnum("status").notNull().default("completed"),
@@ -249,9 +410,11 @@ export const sales = pgTable(
     courtesyTotal: numeric("courtesy_total", { precision: 10, scale: 2 })
       .notNull()
       .default("0"),
-    courtesyApprovedBy: uuid("courtesy_approved_by").references(() => users.id),
-    workerId: uuid("worker_id").references(() => workers.id),
-    policyId: uuid("policy_id").references(() => discountPolicies.id),
+    courtesyApprovedBy: integer("courtesy_approved_by").references(
+      () => users.id,
+    ),
+    workerId: integer("id_worker").references(() => workers.id),
+    policyId: integer("id_policy").references(() => discountPolicies.id),
     workerVerification: workerVerificationEnum("worker_verification")
       .notNull()
       .default("none"),
@@ -261,6 +424,9 @@ export const sales = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // cash_shifts.uuid of the shift it was charged in. Not a foreign key: a
+    // sale made offline may reach the server before its shift's opening.
+    shiftUuid: uuid("shift_uuid"),
     clientCreatedAt: timestamp("client_created_at", {
       withTimezone: true,
     }).notNull(),
@@ -276,15 +442,76 @@ export const sales = pgTable(
       table.cashierId,
       table.clientCreatedAt,
     ),
+    index("sales_shift_idx").on(table.shiftUuid),
   ],
 );
 
+// A cashier's shift at the till, from "Abrir caja" to "Cerrar caja". Created
+// on the device (uuid) so it works without internet. The cashier records what
+// was counted; the expected amounts are computed from the shift's sales and
+// cash movements, and frozen when the admin reviews it.
+export const cashShifts = pgTable(
+  "cash_shifts",
+  {
+    id: integer("id_shift").primaryKey().generatedByDefaultAsIdentity(),
+    uuid: uuid("uuid").notNull().unique(),
+    cashierId: integer("id_cashier")
+      .notNull()
+      .references(() => users.id),
+    status: cashShiftStatusEnum("status").notNull().default("open"),
+    // Device times.
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    openingCash: numeric("opening_cash", { precision: 10, scale: 2 }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    countedCash: numeric("counted_cash", { precision: 10, scale: 2 }),
+    countedYape: numeric("counted_yape", { precision: 10, scale: 2 }),
+    countedCard: numeric("counted_card", { precision: 10, scale: 2 }),
+    closeNote: text("close_note"),
+    // Sales the device made in the shift (to tell if some are still syncing).
+    reportedSales: integer("reported_sales"),
+    expectedCash: numeric("expected_cash", { precision: 10, scale: 2 }),
+    expectedYape: numeric("expected_yape", { precision: 10, scale: 2 }),
+    expectedCard: numeric("expected_card", { precision: 10, scale: 2 }),
+    reviewedBy: integer("id_reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("cash_shifts_cashier_status_idx").on(table.cashierId, table.status),
+    index("cash_shifts_opened_idx").on(table.openedAt),
+  ],
+);
+
+// Money put into or taken out of the drawer during a shift (paying a
+// supplier in cash, change brought in, the owner taking money out).
+export const cashMovements = pgTable(
+  "cash_movements",
+  {
+    id: integer("id_cash_movement").primaryKey().generatedByDefaultAsIdentity(),
+    uuid: uuid("uuid").notNull().unique(),
+    // cash_shifts.uuid (no FK: it may sync before its shift's opening).
+    shiftUuid: uuid("shift_uuid").notNull(),
+    type: cashMovementTypeEnum("type").notNull(),
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    reason: text("reason").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdBy: integer("id_created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("cash_movements_shift_idx").on(table.shiftUuid)],
+);
+
 export const saleItems = pgTable("sale_items", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  saleId: uuid("sale_id")
+  id: integer("id_sale_item").primaryKey().generatedByDefaultAsIdentity(),
+  saleId: integer("id_sale")
     .notNull()
     .references(() => sales.id, { onDelete: "cascade" }),
-  productId: uuid("product_id")
+  productId: integer("id_product")
     .notNull()
     .references(() => products.id),
   // Snapshots: historical sales must show the price actually charged,
@@ -302,18 +529,356 @@ export const saleItems = pgTable("sale_items", {
     .notNull()
     .default("0"),
   isCourtesy: boolean("is_courtesy").notNull().default(false),
+  // Snapshot of products.price_cost when sold, for the real margin.
+  unitCost: numeric("unit_cost", { precision: 12, scale: 4 }),
+  captureSource: captureSourceEnum("capture_source"),
 });
 
+// Physical places that hold stock (back room and shop floor today).
+export const locations = pgTable("locations", {
+  id: integer("id_location").primaryKey().generatedByDefaultAsIdentity(),
+  name: text("name").notNull().unique(),
+  kind: locationKindEnum("kind").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// Kardex: stock is never edited, every change is an append-only row. The
+// unique key makes a retried sync (same sale, same product) a no-op.
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: integer("id_movement").primaryKey().generatedByDefaultAsIdentity(),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    locationId: integer("id_location")
+      .notNull()
+      .references(() => locations.id),
+    qtyDelta: integer("qty_delta").notNull(),
+    // Balance of this product at this location right after the movement,
+    // in server (sync) order.
+    balanceAfter: integer("balance_after").notNull(),
+    type: stockMovementTypeEnum("type").notNull(),
+    // Key of the document that caused the movement (the sale's uuid, a
+    // count's…). Not a foreign key: it points at different tables.
+    refId: uuid("ref_id").notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 4 }),
+    note: text("note"),
+    actorId: integer("id_actor").references(() => users.id),
+    // Device time (an offline sale moves stock when it was made).
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("stock_movements_ref_unique").on(
+      table.type,
+      table.refId,
+      table.productId,
+      table.locationId,
+    ),
+    index("stock_movements_product_idx").on(table.productId, table.createdAt),
+  ],
+);
+
+// Units of a product at a location that share an expiry date. stock_levels
+// stays the total; units beyond the lots' sum are stock without a date.
+// Counts set the lots, receipts add to them and sales consume them FEFO.
+export const stockLots = pgTable(
+  "stock_lots",
+  {
+    id: integer("id_lot").primaryKey().generatedByDefaultAsIdentity(),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    locationId: integer("id_location")
+      .notNull()
+      .references(() => locations.id),
+    expiresAt: date("expires_at", { mode: "string" }).notNull(),
+    quantity: integer("quantity").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("stock_lots_product_location_expiry_unique").on(
+      table.productId,
+      table.locationId,
+      table.expiresAt,
+    ),
+    index("stock_lots_expires_idx").on(table.expiresAt),
+  ],
+);
+
+// What was asked of a supplier before it arrives. Receipts made from it
+// move its status (pending → partial → received).
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: integer("id_order").primaryKey().generatedByDefaultAsIdentity(),
+    supplierId: integer("id_supplier")
+      .notNull()
+      .references(() => suppliers.id),
+    status: purchaseOrderStatusEnum("status").notNull().default("pending"),
+    expectedAt: date("expected_at", { mode: "string" }),
+    // Sum of the lines' estimated cost (when known).
+    estimatedTotal: numeric("estimated_total", { precision: 10, scale: 2 }),
+    note: text("note"),
+    createdBy: integer("id_created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("purchase_orders_status_idx").on(table.status)],
+);
+
+export const purchaseOrderItems = pgTable(
+  "purchase_order_items",
+  {
+    id: integer("id_order_item").primaryKey().generatedByDefaultAsIdentity(),
+    orderId: integer("id_order")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    // null = ordered by the unit.
+    presentationId: integer("id_presentation"),
+    quantity: integer("quantity").notNull(),
+    units: integer("units").notNull(),
+    estimatedTotal: numeric("estimated_total", { precision: 10, scale: 2 }),
+  },
+  (table) => [
+    // Named explicitly: the generated name exceeds Postgres' 63 chars.
+    foreignKey({
+      columns: [table.presentationId],
+      foreignColumns: [productPresentations.id],
+      name: "purchase_order_items_presentation_fk",
+    }),
+    index("purchase_order_items_order_idx").on(table.orderId),
+  ],
+);
+
+// Merchandise entering a location (the Almacén) from a supplier. Each line
+// moves stock_movements (purchase_receipt) and stock_lots in the same
+// transaction, and updates the product's weighted average cost.
+export const goodsReceipts = pgTable(
+  "goods_receipts",
+  {
+    id: integer("id_receipt").primaryKey().generatedByDefaultAsIdentity(),
+    // stock_movements.ref_id of the receipt's movements.
+    uuid: uuid("uuid").notNull().unique().defaultRandom(),
+    supplierId: integer("id_supplier").references(() => suppliers.id),
+    // The purchase order this merchandise answers, if any.
+    orderId: integer("id_order").references(() => purchaseOrders.id),
+    locationId: integer("id_location")
+      .notNull()
+      .references(() => locations.id),
+    docType: receiptDocTypeEnum("doc_type").notNull().default("ninguno"),
+    // Serie-número as printed, e.g. "F020-00014194".
+    docNumber: text("doc_number"),
+    total: numeric("total", { precision: 10, scale: 2 }).notNull(),
+    note: text("note"),
+    createdBy: integer("id_created_by").references(() => users.id),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // The same invoice can't be entered twice.
+    uniqueIndex("goods_receipts_document_unique")
+      .on(table.supplierId, table.docType, table.docNumber)
+      .where(sql`${table.docNumber} is not null`),
+    index("goods_receipts_received_idx").on(table.receivedAt),
+  ],
+);
+
+export const goodsReceiptItems = pgTable(
+  "goods_receipt_items",
+  {
+    id: integer("id_receipt_item").primaryKey().generatedByDefaultAsIdentity(),
+    receiptId: integer("id_receipt")
+      .notNull()
+      .references(() => goodsReceipts.id, { onDelete: "cascade" }),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    // null = bought by the unit.
+    presentationId: integer("id_presentation"),
+    // What the invoice says: in presentations (2 Cajas) and in units
+    // (2 × 144 = 288). received_units is what actually arrived; stock moves
+    // by it and any gap becomes a receipt_discrepancies row.
+    quantity: integer("quantity").notNull(),
+    units: integer("units").notNull(),
+    receivedUnits: integer("received_units").notNull(),
+    lineTotal: numeric("line_total", { precision: 10, scale: 2 }).notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 4 }).notNull(),
+    isBonus: boolean("is_bonus").notNull().default(false),
+    expiresAt: date("expires_at", { mode: "string" }),
+    captureSource: captureSourceEnum("capture_source"),
+  },
+  (table) => [
+    // Named explicitly: the generated name exceeds Postgres' 63 chars.
+    foreignKey({
+      columns: [table.presentationId],
+      foreignColumns: [productPresentations.id],
+      name: "goods_receipt_items_presentation_fk",
+    }),
+    index("goods_receipt_items_receipt_idx").on(table.receiptId),
+  ],
+);
+
+// A receipt line where what arrived didn't match the invoice. units < 0:
+// missing; units > 0: extra. Stays "open" until the admin says what
+// happened (see discrepancyStatusEnum).
+export const receiptDiscrepancies = pgTable(
+  "receipt_discrepancies",
+  {
+    id: integer("id_discrepancy").primaryKey().generatedByDefaultAsIdentity(),
+    // stock_movements.ref_id when resolving moves stock.
+    uuid: uuid("uuid").notNull().unique().defaultRandom(),
+    receiptId: integer("id_receipt")
+      .notNull()
+      .references(() => goodsReceipts.id, { onDelete: "cascade" }),
+    receiptItemId: integer("id_receipt_item").notNull(),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    units: integer("units").notNull(),
+    // |units| × the line's cost per unit.
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    status: discrepancyStatusEnum("status").notNull().default("open"),
+    resolutionNote: text("resolution_note"),
+    resolvedBy: integer("id_resolved_by").references(() => users.id),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Named explicitly: the generated name exceeds Postgres' 63 chars.
+    foreignKey({
+      columns: [table.receiptItemId],
+      foreignColumns: [goodsReceiptItems.id],
+      name: "receipt_discrepancies_item_fk",
+    }).onDelete("cascade"),
+    index("receipt_discrepancies_status_idx").on(table.status),
+  ],
+);
+
+// One "conteo del día" at a location: who counted what, and when.
+export const stockCounts = pgTable("stock_counts", {
+  id: integer("id_count").primaryKey().generatedByDefaultAsIdentity(),
+  // stock_movements.ref_id of the adjustments it ends up causing.
+  uuid: uuid("uuid").notNull().unique().defaultRandom(),
+  locationId: integer("id_location")
+    .notNull()
+    .references(() => locations.id),
+  countedBy: integer("id_counted_by").references(() => users.id),
+  countedAt: timestamp("counted_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const stockCountItems = pgTable(
+  "stock_count_items",
+  {
+    id: integer("id_count_item").primaryKey().generatedByDefaultAsIdentity(),
+    countId: integer("id_count")
+      .notNull()
+      .references(() => stockCounts.id, { onDelete: "cascade" }),
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    // System balance when it was counted (never shown to whoever counts).
+    expected: integer("expected").notNull(),
+    counted: integer("counted").notNull(),
+    // Units by expiry date, for products that expire.
+    lots: jsonb("lots")
+      .$type<{ expiresAt: string; quantity: number }[]>()
+      .notNull()
+      .default([]),
+    status: countItemStatusEnum("status").notNull(),
+    reviewedBy: integer("id_reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+    captureSource: captureSourceEnum("capture_source"),
+  },
+  (table) => [
+    index("stock_count_items_status_idx").on(table.status),
+    index("stock_count_items_product_idx").on(table.productId),
+  ],
+);
+
+// Units moved between locations (Almacén → Tienda). Lots travel with them,
+// soonest expiry first.
+export const stockTransfers = pgTable("stock_transfers", {
+  id: integer("id_transfer").primaryKey().generatedByDefaultAsIdentity(),
+  uuid: uuid("uuid").notNull().unique().defaultRandom(),
+  fromLocationId: integer("id_from_location")
+    .notNull()
+    .references(() => locations.id),
+  toLocationId: integer("id_to_location")
+    .notNull()
+    .references(() => locations.id),
+  note: text("note"),
+  createdBy: integer("id_created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const stockTransferItems = pgTable("stock_transfer_items", {
+  id: integer("id_transfer_item").primaryKey().generatedByDefaultAsIdentity(),
+  transferId: integer("id_transfer")
+    .notNull()
+    .references(() => stockTransfers.id, { onDelete: "cascade" }),
+  productId: integer("id_product")
+    .notNull()
+    .references(() => products.id),
+  units: integer("units").notNull(),
+  captureSource: captureSourceEnum("capture_source"),
+});
+
+// Denormalized sum of stock_movements per product and location, updated in
+// the same transaction with an atomic `quantity + delta`.
+export const stockLevels = pgTable(
+  "stock_levels",
+  {
+    productId: integer("id_product")
+      .notNull()
+      .references(() => products.id),
+    locationId: integer("id_location")
+      .notNull()
+      .references(() => locations.id),
+    quantity: integer("quantity").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.productId, table.locationId] })],
+);
+
 // Points ledger: every movement is a row, so the balance can always be
-// explained. sale_id is unique so a retried sync never awards points twice.
+// explained. id_sale is unique so a retried sync never awards points twice.
 export const loyaltyLedger = pgTable(
   "loyalty_ledger",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workerId: uuid("worker_id")
+    id: integer("id_loyalty").primaryKey().generatedByDefaultAsIdentity(),
+    workerId: integer("id_worker")
       .notNull()
       .references(() => workers.id),
-    saleId: uuid("sale_id")
+    saleId: integer("id_sale")
       .unique()
       .references(() => sales.id),
     points: integer("points").notNull(),
@@ -326,16 +891,20 @@ export const loyaltyLedger = pgTable(
 );
 
 // Append-only trail of sensitive actions (failed PINs, approvals, PIN
-// resets, policy changes). Some are created offline, hence client ids and
+// resets, policy changes). Some are created offline, hence client uuids and
 // occurred_at (device time) next to created_at (server time).
 export const auditEvents = pgTable(
   "audit_events",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: integer("id_audit").primaryKey().generatedByDefaultAsIdentity(),
+    // Client-generated for offline events: the sync's idempotency key.
+    uuid: uuid("uuid").notNull().unique().defaultRandom(),
     type: text("type").notNull(),
-    actorId: uuid("actor_id").references(() => users.id),
-    workerId: uuid("worker_id").references(() => workers.id),
-    saleId: uuid("sale_id"),
+    actorId: integer("id_actor").references(() => users.id),
+    workerId: integer("id_worker").references(() => workers.id),
+    // sales.uuid, not a foreign key: a courtesy is approved at the till
+    // before the sale exists on the server.
+    saleUuid: uuid("sale_uuid"),
     payload: jsonb("payload")
       .$type<Record<string, unknown>>()
       .notNull()

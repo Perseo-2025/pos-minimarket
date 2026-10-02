@@ -10,29 +10,44 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
 import { CategoryGlyph } from "@/components/pos/category-glyph";
 import { ProductImagePlaceholder } from "@/components/pos/product-image-placeholder";
+import type { Presentation } from "@/domain/entities/presentation";
+import { productMargin } from "@/domain/services/product-margin";
 import { formatSoles } from "@/lib/money";
-import { DataTable } from "./data-table";
+import { cn } from "@/lib/utils";
+import { DataTable, ID_COLUMN, IdCell } from "./data-table";
 import { DataTablePagination } from "./data-table-pagination";
+import { DeactivateButton } from "./deactivate-button";
+import { PresentationsDialog } from "./presentations-dialog";
 import { type CategoryOption, ProductForm } from "./product-form";
 import { StatusBadge } from "./status-badge";
 
 type Product = {
-  id: string;
+  id: number;
   name: string;
+  barcode: string | null;
   description: string | null;
-  categoryId: string;
+  categoryId: number;
   categoryName: string;
   categoryIcon: string | null;
   priceSale: string;
+  priceCost: string | null;
+  tracksExpiry: boolean | null;
   workerDiscountPercent: number;
+  // Units across all locations; null = stock not tracked yet (no count).
+  stock: number | null;
+  presentations: Presentation[];
   imageUrl: string | null;
   isActive: boolean;
 };
 
 const COLUMNS = [
+  ID_COLUMN,
   { label: "Producto" },
   { label: "Categoría" },
-  { label: "Precio", className: "text-right" },
+  { label: "P. compra", className: "text-right" },
+  { label: "P. venta", className: "text-right" },
+  { label: "Utilidad", className: "text-right" },
+  { label: "Stock", className: "text-right" },
   { label: "Estado" },
   { label: "Acciones", className: "text-right" },
 ];
@@ -78,6 +93,7 @@ export function ProductTable({
     >
       {pagination.rows.map((product) => (
         <TableRow key={product.id}>
+          <IdCell id={product.id} />
           <TableCell className="max-w-80">
             <div className="flex items-center gap-3">
               <ProductImagePlaceholder
@@ -92,6 +108,14 @@ export function ProductTable({
                     {product.description}
                   </div>
                 )}
+                {product.presentations.some((p) => p.isActive) && (
+                  <div className="truncate text-xs text-muted-foreground">
+                    {product.presentations
+                      .filter((p) => p.isActive)
+                      .map((p) => `${p.name} ×${p.unitsTotal}`)
+                      .join(" · ")}
+                  </div>
+                )}
               </div>
             </div>
           </TableCell>
@@ -101,12 +125,32 @@ export function ProductTable({
               {product.categoryName}
             </Badge>
           </TableCell>
+          <TableCell className="text-right tabular-nums text-muted-foreground">
+            {product.priceCost === null ? "—" : formatSoles(product.priceCost)}
+          </TableCell>
           <TableCell className="text-right tabular-nums">
             <div className="font-medium">{formatSoles(product.priceSale)}</div>
             {product.workerDiscountPercent > 0 && (
               <div className="text-xs text-emerald-700 dark:text-emerald-400">
                 Trabajador −{product.workerDiscountPercent}%
               </div>
+            )}
+          </TableCell>
+          <TableCell className="text-right tabular-nums">
+            <ProfitCell priceSale={product.priceSale} priceCost={product.priceCost} />
+          </TableCell>
+          <TableCell className="text-right tabular-nums">
+            {product.stock === null ? (
+              <span className="text-xs text-muted-foreground">Sin conteo</span>
+            ) : (
+              <span
+                className={cn(
+                  "font-medium",
+                  product.stock <= 0 && "text-destructive",
+                )}
+              >
+                {product.stock}
+              </span>
             )}
           </TableCell>
           <TableCell>
@@ -124,23 +168,62 @@ export function ProductTable({
                   </Button>
                 }
               />
-              <Button
-                size="sm"
-                variant={product.isActive ? "ghost" : "outline"}
-                className={
-                  product.isActive
-                    ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    : undefined
-                }
-                disabled={isPending}
-                onClick={() => handleToggleActive(product)}
-              >
-                {product.isActive ? "Desactivar" : "Reactivar"}
-              </Button>
+              <PresentationsDialog
+                productId={product.id}
+                productName={product.name}
+                presentations={product.presentations}
+              />
+              {product.isActive ? (
+                <DeactivateButton
+                  label={`Desactivar ${product.name}`}
+                  disabled={isPending}
+                  onClick={() => handleToggleActive(product)}
+                />
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isPending}
+                  onClick={() => handleToggleActive(product)}
+                >
+                  Reactivar
+                </Button>
+              )}
             </div>
           </TableCell>
         </TableRow>
       ))}
     </DataTable>
+  );
+}
+
+function ProfitCell({
+  priceSale,
+  priceCost,
+}: {
+  priceSale: string;
+  priceCost: string | null;
+}) {
+  const margin = productMargin(
+    Number(priceSale),
+    priceCost === null ? null : Number(priceCost),
+  );
+  if (!margin) return <span className="text-muted-foreground">—</span>;
+  return (
+    <>
+      <div
+        className={cn(
+          "font-medium",
+          margin.profit < 0
+            ? "text-destructive"
+            : "text-emerald-700 dark:text-emerald-400",
+        )}
+      >
+        {formatSoles(margin.profit)}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {margin.markupPercent}% sobre costo
+      </div>
+    </>
   );
 }

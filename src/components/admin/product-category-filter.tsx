@@ -20,22 +20,23 @@ export function ProductCategoryFilter({
   selected,
 }: {
   categories: CategoryOption[];
-  selected: string | null;
+  selected: number | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const items = [
     { value: ALL, label: "Todas las categorías" },
+    // Select values are strings here (they end up in the URL).
     ...categories.map((c) => ({
-      value: c.id,
+      value: String(c.id),
       label: c.isActive ? c.name : `${c.name} (inactiva)`,
     })),
   ];
 
   return (
     <Select
-      value={selected ?? ALL}
+      value={selected === null ? ALL : String(selected)}
       items={items}
       onValueChange={(value) =>
         startTransition(() =>

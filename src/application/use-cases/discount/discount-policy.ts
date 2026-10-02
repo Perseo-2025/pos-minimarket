@@ -12,7 +12,7 @@ export async function getDiscountPolicyOverviewUseCase(repo: DiscountPolicyRepos
 export async function updateDiscountPolicyUseCase(
   deps: { policies: DiscountPolicyRepository; audit: AuditRepository },
   input: unknown,
-  actorId: string,
+  actorId: number,
 ) {
   const data = discountPolicySchema.parse(input);
   const previous = await deps.policies.getActive();

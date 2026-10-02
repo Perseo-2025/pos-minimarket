@@ -1,4 +1,5 @@
 import { BLOCKING_AUDIT_FLAGS, type AuditFlag } from "@/domain/entities/audit";
+import { can } from "@/domain/entities/user";
 import type { SaleRecord } from "@/domain/entities/sale";
 import {
   CashierNotFoundError,
@@ -24,19 +25,19 @@ export interface CreateSaleDeps {
   policies: DiscountPolicyRepository;
   verifyWorkerToken: (
     token: string | undefined,
-    expected: { workerId: string; cashierId: string; at: Date },
+    expected: { workerId: number; cashierId: number; at: Date },
   ) => boolean;
   // Returns the approving admin's id, or null.
   verifyCourtesyToken: (
     token: string | undefined,
-    expected: { saleId: string; cashierId: string; amount: number; at: Date },
-  ) => string | null;
+    expected: { saleUuid: string; cashierId: number; amount: number; at: Date },
+  ) => number | null;
 }
 
 export async function createSaleUseCase(
   repos: CreateSaleDeps,
   input: unknown,
-  actorId: string,
+  actorId: number,
 ) {
   const data = saleCreateSchema.parse(input);
 
@@ -53,7 +54,7 @@ export async function createSaleUseCase(
   if (cashierId !== actor.id) {
     // Only an admin may sync a sale on behalf of another cashier; a cashier
     // syncing someone else's sale would corrupt both registers.
-    if (actor.role !== "admin") {
+    if (!can(actor.role, "manage")) {
       throw new ForbiddenError("Sale belongs to another cashier");
     }
 
@@ -62,8 +63,8 @@ export async function createSaleUseCase(
   }
 
   // Retry of an already-synced sale: nothing to re-evaluate.
-  if (await repos.sales.exists(data.id)) {
-    return { id: data.id, total: data.total, inserted: false };
+  if (await repos.sales.existsByUuid(data.uuid)) {
+    return { uuid: data.uuid, total: data.total, inserted: false };
   }
 
   // Never trust client-computed amounts: line totals are recomputed, each
@@ -124,7 +125,7 @@ export async function createSaleUseCase(
   const courtesyApprovedBy =
     courtesyTotal > 0
       ? repos.verifyCourtesyToken(data.courtesyToken, {
-          saleId: data.id,
+          saleUuid: data.uuid,
           cashierId,
           amount: courtesyTotal,
           at: soldAt,
@@ -154,7 +155,8 @@ export async function createSaleUseCase(
     !flags.some((flag) => BLOCKING_AUDIT_FLAGS.includes(flag));
 
   const record: SaleRecord = {
-    id: data.id,
+    uuid: data.uuid,
+    shiftUuid: data.shiftUuid ?? null,
     cashierId,
     paymentType: data.paymentType,
     items,

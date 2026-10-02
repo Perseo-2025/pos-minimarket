@@ -19,7 +19,7 @@ function toUser(row: typeof users.$inferSelect): UserWithCredentials {
 }
 
 export class DrizzleUserRepository implements UserRepository {
-  async findById(id: string): Promise<User | null> {
+  async findById(id: number): Promise<User | null> {
     const [row] = await db
       .select({
         id: users.id,
@@ -59,7 +59,7 @@ export class DrizzleUserRepository implements UserRepository {
     });
   }
 
-  async setActive(id: string, isActive: boolean): Promise<void> {
+  async setActive(id: number, isActive: boolean): Promise<void> {
     await db
       .update(users)
       .set({ isActive, updatedAt: new Date() })

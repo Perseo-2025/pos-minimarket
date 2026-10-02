@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { evaluateSaleFlags, type SaleAuditContext } from "./sale-audit";
 
-const PRODUCT = "11111111-1111-4111-8111-111111111111";
-const OTHER = "22222222-2222-4222-8222-222222222222";
+const PRODUCT = 1;
+const OTHER = 2;
 
 type Line = SaleAuditContext["lines"][number];
 const line = (overrides: Partial<Line> = {}): Line => ({

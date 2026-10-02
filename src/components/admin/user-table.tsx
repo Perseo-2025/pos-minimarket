@@ -8,13 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { usePagination } from "@/hooks/use-pagination";
+import { USER_ROLE_LABELS, type UserRole } from "@/domain/entities/user";
 import { initials } from "@/lib/initials";
-import { DataTable } from "./data-table";
+import { DataTable, ID_COLUMN, IdCell } from "./data-table";
 import { DataTablePagination } from "./data-table-pagination";
+import { DeactivateButton } from "./deactivate-button";
 import { StatusBadge } from "./status-badge";
 
 type User = {
-  id: string;
+  id: number;
   name: string;
   username: string;
   role: string;
@@ -22,6 +24,7 @@ type User = {
 };
 
 const COLUMNS = [
+  ID_COLUMN,
   { label: "Usuario" },
   { label: "Rol" },
   { label: "Estado" },
@@ -58,6 +61,7 @@ export function UserTable({ users }: { users: User[] }) {
     >
       {pagination.rows.map((user) => (
         <TableRow key={user.id}>
+          <IdCell id={user.id} />
           <TableCell>
             <div className="flex items-center gap-3">
               <Avatar size="sm">
@@ -73,26 +77,29 @@ export function UserTable({ users }: { users: User[] }) {
           </TableCell>
           <TableCell>
             <Badge variant={user.role === "admin" ? "secondary" : "outline"}>
-              {user.role === "admin" ? "Administrador" : "Cajero"}
+              {USER_ROLE_LABELS[user.role as UserRole] ?? user.role}
             </Badge>
           </TableCell>
           <TableCell>
             <StatusBadge active={user.isActive} />
           </TableCell>
           <TableCell className="text-right">
-            <Button
-              size="sm"
-              variant={user.isActive ? "ghost" : "outline"}
-              className={
-                user.isActive
-                  ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  : undefined
-              }
-              disabled={isPending}
-              onClick={() => handleToggle(user)}
-            >
-              {user.isActive ? "Desactivar" : "Activar"}
-            </Button>
+            {user.isActive ? (
+              <DeactivateButton
+                label={`Desactivar a ${user.name}`}
+                disabled={isPending}
+                onClick={() => handleToggle(user)}
+              />
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => handleToggle(user)}
+              >
+                Activar
+              </Button>
+            )}
           </TableCell>
         </TableRow>
       ))}

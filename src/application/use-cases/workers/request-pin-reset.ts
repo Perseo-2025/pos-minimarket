@@ -14,7 +14,7 @@ import { pinResetSchema } from "@/application/validation/worker";
 export async function requestPinResetUseCase(
   deps: { workers: WorkerRepository; audit: AuditRepository; pinHasher: PinHasher },
   input: unknown,
-  actorId: string,
+  actorId: number,
 ) {
   const data = pinResetSchema.parse(input);
 
@@ -29,8 +29,8 @@ export async function requestPinResetUseCase(
   }
 
   await deps.workers.replacePin(worker.id, data.pinHash);
-  // Keyed by the client op id: a retried sync doesn't log it twice.
-  await deps.audit.recordWithId(data.id, {
+  // Keyed by the client op uuid: a retried sync doesn't log it twice.
+  await deps.audit.recordWithUuid(data.uuid, {
     type: "worker_pin_reset_requested",
     actorId,
     workerId: worker.id,

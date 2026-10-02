@@ -30,7 +30,7 @@ export async function listWorkersUseCase(
   return { workers, counts };
 }
 
-export async function getWorkerDetailUseCase(repo: WorkerRepository, id: string) {
+export async function getWorkerDetailUseCase(repo: WorkerRepository, id: number) {
   const worker = await repo.findById(id);
   if (!worker) throw new WorkerNotFoundError();
   return { worker: withoutPin(worker), purchases: await repo.purchaseHistory(id, 30) };
@@ -38,9 +38,9 @@ export async function getWorkerDetailUseCase(repo: WorkerRepository, id: string)
 
 export async function setWorkerStatusUseCase(
   deps: { workers: WorkerRepository; audit: AuditRepository },
-  workerId: string,
+  workerId: number,
   action: WorkerAction,
-  actorId: string,
+  actorId: number,
 ) {
   const transition = TRANSITIONS[action];
   if (!transition) throw new ValidationError("Acción no válida");
@@ -68,8 +68,8 @@ export async function setWorkerStatusUseCase(
 // Admin re-checks a manually typed name against RENIEC and adopts it.
 export async function refreshWorkerNameUseCase(
   deps: { workers: WorkerRepository; audit: AuditRepository; identity: IdentityLookup },
-  workerId: string,
-  actorId: string,
+  workerId: number,
+  actorId: number,
   timeoutMs: number,
 ) {
   const worker = await deps.workers.findById(workerId);
